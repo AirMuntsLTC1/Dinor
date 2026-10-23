@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import '../ffi/dinor_bindings.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../chat/chat_service.dart';
 import 'chat_screen.dart';
 import 'ai_avatar.dart';
 import 'bottom_nav.dart';
@@ -15,28 +16,50 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  String _nativeStatus = 'Checking core...';
-  int _currentIndex = 0; // 0 = Chats, 1 = Friends, 2 = Settings, 3 = Profile
-  int _drawerPage = 0; // 0 = Messages, 1 = Home (Social Media)
-
-  final List<Map<String, String>> _chats = [
-    {'name': 'Alice', 'msg': 'Hey, are we still on for tomorrow?', 'time': '10:45 AM'},
-    {'name': 'Bob', 'msg': 'Sent the files over.', 'time': 'Yesterday'},
-    {'name': 'Project Dinor', 'msg': 'Build successful!', 'time': 'Monday'},
-  ];
+  int _currentIndex = 0;
+  int _drawerPage = 0;
+  final supabase = Supabase.instance.client;
+  
+  List<Map<String, dynamic>> _conversations = [];
+  List<Map<String, dynamic>> _searchResults = [];
+  bool _isSearching = false;
 
   @override
   void initState() {
     super.initState();
-    _checkNativeCore();
+    _listenToConversations();
   }
 
-  void _checkNativeCore() {
-    try {
-      final core = DinorCore.load();
-      setState(() => _nativeStatus = core.version());
-    } catch (e) {
-      setState(() => _nativeStatus = 'Core offline');
+  void _listenToConversations() {
+    supabase.from('conversations').stream(primaryKey: ['id']).listen((data) {
+      if (mounted) {
+        setState(() {
+          final myId = supabase.auth.currentUser!.id;
+          _conversations = data.where((c) => c['user1_id'] == myId || c['user2_id'] == myId).toList();
+        });
+      }
+    });
+  }
+
+  Future<void> _searchUsers(String query) async {
+    if (query.isEmpty) {
+      setState(() { _isSearching = false; _searchResults = []; });
+      return;
+    }
+    setState(() => _isSearching = true);
+    final results = await ChatService.searchUsers(query);
+    setState(() => _searchResults = results);
+  }
+
+  Future<void> _openChat(String otherUserId, String name) async {
+    final convId = await ChatService.getOrCreateConversation(otherUserId);
+    if (mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ChatScreen(title: name, conversationId: convId, otherUserId: otherUserId),
+        ),
+      );
     }
   }
 
@@ -46,7 +69,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       backgroundColor: DinorTheme.bgDark,
-      // Add the Side Drawer
       drawer: SideDrawer(
         onHomeTap: () => setState(() => _drawerPage = 1),
         onMessagesTap: () => setState(() => _drawerPage = 0),
@@ -55,198 +77,108 @@ class _HomeScreenState extends State<HomeScreen> {
         child: _drawerPage == 0 
           ? Column(
           children: [
-            // 1. Top Header
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Row(
                 children: [
                   Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: brandBlue.withValues(alpha: 0.15),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: brandBlue, width: 1.5),
-                    ),
+                    width: 40, height: 40,
+                    decoration: BoxDecoration(color: brandBlue.withValues(alpha: 0.15), shape: BoxShape.circle, border: Border.all(color: brandBlue, width: 1.5)),
                     child: const Icon(Icons.person, color: brandBlue, size: 24),
                   ),
                   const SizedBox(width: 12),
-                  const Text(
-                    'Dinor',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: brandBlue),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.more_vert, color: DinorTheme.textGrey),
-                    onPressed: () {},
-                  ),
+                  const Text('Dinor', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: brandBlue)),
                 ],
               ),
             ),
-
-            // 2. Search Bar
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Container(
-                decoration: BoxDecoration(
-                  color: DinorTheme.surfaceDark,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: DinorTheme.softShadow,
-                ),
+                decoration: BoxDecoration(color: DinorTheme.surfaceDark, borderRadius: BorderRadius.circular(16), boxShadow: DinorTheme.softShadow),
                 child: TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Search messages...',
-                    hintStyle: const TextStyle(color: DinorTheme.textGrey),
-                    prefixIcon: const Icon(Icons.search, color: DinorTheme.textGrey),
-                    filled: false,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
+                  onChanged: _searchUsers,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(hintText: 'Search users...', hintStyle: TextStyle(color: DinorTheme.textGrey), prefixIcon: Icon(Icons.search, color: DinorTheme.textGrey), border: InputBorder.none, contentPadding: EdgeInsets.symmetric(vertical: 14)),
                 ),
               ),
             ),
-
             const SizedBox(height: 8),
-
-            // 3. Custom AI Conversation Card
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const ChatScreen(title: 'Dinor AI', isAi: true),
+            if (!_isSearching)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: GestureDetector(
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ChatScreen(title: 'Dinor AI', isAi: true))),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(gradient: DinorTheme.primaryGradient, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: brandBlue.withValues(alpha: 0.3), blurRadius: 20, offset: const Offset(0, 8))]),
+                    child: Row(
+                      children: [
+                        const AnimatedAIAvatar(size: 48),
+                        const SizedBox(width: 16),
+                        const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Dinor AI Assistant', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)), SizedBox(height: 4), Text('Ask me anything!', style: TextStyle(color: Colors.white70, fontSize: 13))])),
+                        Icon(Icons.arrow_forward_ios, color: Colors.white.withValues(alpha: 0.7), size: 16),
+                      ],
                     ),
-                  );
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    gradient: DinorTheme.primaryGradient,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: brandBlue.withValues(alpha: 0.3),
-                        blurRadius: 20,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    children: [
-                      const AnimatedAIAvatar(size: 48),
-                      const SizedBox(width: 16),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Dinor AI Assistant',
-                              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
-                            SizedBox(height: 4),
-                            Text(
-                              'Ask me anything!',
-                              style: TextStyle(color: Colors.white70, fontSize: 13),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Icon(Icons.arrow_forward_ios, color: Colors.white.withValues(alpha: 0.7), size: 16),
-                    ],
                   ),
                 ),
               ),
-            ),
-
             const SizedBox(height: 16),
-
-            // 4. Chat List
             Expanded(
               child: ListView.separated(
-                itemCount: _chats.length,
+                itemCount: _isSearching ? _searchResults.length : _conversations.length,
                 separatorBuilder: (context, index) => const SizedBox(height: 4),
                 itemBuilder: (context, index) {
-                  final chat = _chats[index];
-                  return Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: DinorTheme.surfaceDark,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: DinorTheme.softShadow,
-                    ),
-                    child: ListTile(
-                    hoverColor: Colors.transparent,
-                    splashColor: Colors.transparent,
-                    focusColor: Colors.transparent,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    leading: CircleAvatar(
-                      backgroundColor: brandBlue.withValues(alpha: 0.15),
-                      child: Text(
-                        chat['name']![0],
-                        style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    title: Text(chat['name']!, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
-                    subtitle: Text(chat['msg']!, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: DinorTheme.textGrey)),
-                    trailing: Text(chat['time']!, style: const TextStyle(fontSize: 12, color: DinorTheme.textGrey)),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => ChatScreen(title: chat['name']!),
+                  if (_isSearching) {
+                    final user = _searchResults[index];
+                    return ListTile(
+                      leading: CircleAvatar(backgroundColor: brandBlue, child: Text(user['username'][0].toUpperCase())),
+                      title: Text(user['username'], style: const TextStyle(color: Colors.white)),
+                      onTap: () => _openChat(user['id'], user['username']),
+                    );
+                  } else {
+                    final conv = _conversations[index];
+                    final myId = supabase.auth.currentUser!.id;
+                    final otherUser = conv['user1_id'] == myId ? conv['user2'] : conv['user1'];
+                    final otherName = otherUser?['username'] ?? 'Unknown';
+                    
+                    return Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                      decoration: BoxDecoration(color: DinorTheme.surfaceDark, borderRadius: BorderRadius.circular(16), boxShadow: DinorTheme.softShadow),
+                      child: ListTile(
+                        hoverColor: Colors.transparent, splashColor: Colors.transparent, focusColor: Colors.transparent,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        leading: CircleAvatar(backgroundColor: brandBlue.withValues(alpha: 0.15), child: Text(otherName[0].toUpperCase(), style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold))),
+                        title: Text(otherName, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
+                        subtitle: Text(conv['last_message'] ?? 'No messages yet', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: DinorTheme.textGrey)),
+                        trailing: FutureBuilder<int>(
+                          future: ChatService.getUnreadCount(conv['id']),
+                          builder: (context, snapshot) {
+                            if (snapshot.hasData && snapshot.data! > 0) {
+                              return Container(padding: const EdgeInsets.all(6), decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle), child: Text(snapshot.data.toString(), style: const TextStyle(color: Colors.white, fontSize: 12)));
+                            }
+                            return const SizedBox.shrink();
+                          },
                         ),
-                      );
-                    },
-                  ),
-                  );
+                        onTap: () => _openChat(otherUser['id'], otherName),
+                      ),
+                    );
+                  }
                 },
               ),
             ),
-            
-            // 5. Floating Bottom Navigation Bar
             CustomBottomNav(
               currentIndex: _currentIndex,
               onTap: (index) {
                 if (index == 3) {
-                  // Push the ProfileScreen as a new route so the phone's back button works
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => const ProfileScreen()),
-                  ).then((_) {
-                    // When we come back, reset the nav index to Chats
-                    setState(() => _currentIndex = 0);
-                  });
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen())).then((_) => setState(() => _currentIndex = 0));
                 } else {
                   setState(() => _currentIndex = index);
                 }
               },
             ),
-
-            // 6. Native Core Status Footer
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              color: DinorTheme.surfaceDark,
-              child: Text(
-                'Native Core: $_nativeStatus',
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 10, color: Colors.black54),
-              ),
-            ),
           ],
           )
-          : const Center(
-              child: Text(
-                'Home Feed (Social Media)\nComing Soon!', 
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white, fontSize: 18),
-              ),
-            ),
+          : const Center(child: Text('Home Feed\nComing Soon!', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 18))),
       ),
     );
   }

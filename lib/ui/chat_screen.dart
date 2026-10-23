@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:photo_manager/photo_manager.dart';
 import '../ffi/dinor_bindings.dart';
 import '../chat/ai_service.dart';
+import '../chat/chat_service.dart';
 import 'ai_avatar.dart';
 import 'media_picker.dart';
 import 'emoji_picker.dart';
@@ -24,8 +25,10 @@ class Message {
 class ChatScreen extends StatefulWidget {
   final String title;
   final bool isAi;
+  final String? conversationId;
+  final String? otherUserId;
 
-  const ChatScreen({super.key, required this.title, this.isAi = false});
+  const ChatScreen({super.key, required this.title, this.isAi = false, this.conversationId, this.otherUserId});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -68,6 +71,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     
     _currentUserId = supabase.auth.currentUser?.id;
+    if (widget.conversationId != null) await ChatService.markAsRead(widget.conversationId!);
     _fetchMessages();
 
     _chatChannel = supabase.channel('public:messages')
@@ -94,7 +98,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _fetchMessages() async {
     try {
-      final data = await supabase.from('messages').select().order('created_at', ascending: true);
+      final data = await supabase.from('messages').select().eq('conversation_id', widget.conversationId ?? '').order('created_at', ascending: true);
       setState(() {
         _messages.clear();
         for (var row in data) {
