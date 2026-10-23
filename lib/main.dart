@@ -16,6 +16,8 @@ class DinorApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
+        splashFactory: NoSplash.splashFactory, // Removes tap highlights globally
+        highlightColor: Colors.transparent,    // Removes the long-press text highlight
         colorScheme: ColorScheme.fromSeed(
           seedColor: brandBlue,
           primary: brandBlue,

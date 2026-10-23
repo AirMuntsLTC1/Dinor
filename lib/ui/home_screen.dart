@@ -171,6 +171,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       boxShadow: DinorTheme.softShadow,
                     ),
                     child: ListTile(
+                    hoverColor: Colors.transparent,
+                    splashColor: Colors.transparent,
+                    focusColor: Colors.transparent,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     leading: CircleAvatar(
                       backgroundColor: brandBlue.withValues(alpha: 0.15),
