@@ -1,59 +1,61 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:html/parser.dart' as parser;
-import '../ffi/dinor_bindings.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dart:convert';
 
 class DinorAI {
   static Future<String> getResponse(String userMessage) async {
     final msg = userMessage.toLowerCase().trim();
 
     if (msg == 'hi' || msg == 'hello' || msg == 'hey') {
-      return "Hello! I am Dinor AI. My brain runs on C++. What do you want to know?";
+      return "Hello! I am Dinor AI. I am powered by Llama 3. What do you want to know?";
     }
     if (msg.contains('your name')) {
-      return "I am Dinor AI, powered by a native C++ search engine. No external APIs!";
+      return "I am Dinor AI, running on a completely free AI engine. How can I help you today?";
     }
 
-    // Check internet before trying to search
     final connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult.contains(ConnectivityResult.none)) {
-      return "I am currently offline. Please check your internet connection to search the web!";
+      return "I am currently offline. Please check your internet connection.";
     }
 
     try {
-      // 1. Fetch web results
-      final query = Uri.encodeComponent(userMessage);
-      final url = Uri.parse('https://html.duckduckgo.com/html/?q=$query');
-      
-      final response = await http.get(url, headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      });
-
-      if (response.statusCode == 200) {
-        var document = parser.parse(response.body);
+      // 1. Fetch web results for context
+      String context = "";
+      try {
+        final query = Uri.encodeComponent(userMessage);
+        final url = Uri.parse('https://html.duckduckgo.com/html/?q=$query');
+        final searchRes = await http.get(url, headers: {'User-Agent': 'Mozilla/5.0'});
         
-        // Get all text from the result snippets
-        var snippets = document.getElementsByClassName('result__snippet');
-        if (snippets.isEmpty) return "I couldn't find any web results for that.";
-
-        // Combine all text into one giant string
-        String allText = snippets.map((e) => e.text.trim()).join(' ');
-
-        // 2. Send to C++ Core to extract the best sentence based on keywords
-        final core = DinorCore.load();
-        final bestAnswer = core.extractAiAnswer(userMessage, allText);
-
-        if (bestAnswer.isNotEmpty) {
-          return "Here is what I found:\n\n$bestAnswer";
-        } else {
-          // Fallback if C++ couldn't find a good match
-          final snippet = allText.length > 150 ? allText.substring(0, 150) : allText;
-          return "I found some results, but they didn't directly answer your question. Here is the raw context:\n\n$snippet...";
+        if (searchRes.statusCode == 200) {
+          var document = parser.parse(searchRes.body);
+          var snippets = document.getElementsByClassName('result__snippet');
+          if (snippets.isNotEmpty) {
+            context = snippets.take(3).map((e) => e.text.trim()).join('\n');
+          }
         }
+      } catch (e) {
+        debugPrint("Search failed, continuing with AI only: $e");
       }
-      return "My web search failed (Status: ${response.statusCode}).";
+
+      // 2. Call the secure Supabase Edge Function
+      final supabase = Supabase.instance.client;
+      final response = await supabase.functions.invoke(
+        'chat-ai',
+        body: {
+          'userMessage': userMessage,
+          'context': context,
+        },
+      );
+
+      if (response.status == 200 && response.data['reply'] != null) {
+        return response.data['reply'];
+      } else {
+        return "I'm having trouble thinking right now. (Error ${response.status})";
+      }
     } catch (e) {
-      return "Oops, I lost my internet connection. Error: $e";
+      return "Oops, I lost my connection. Error: $e";
     }
   }
 }
