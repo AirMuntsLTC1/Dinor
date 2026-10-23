@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'home_screen.dart';
 import 'dinor_theme.dart';
 
@@ -22,26 +23,51 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      // Tell Supabase to initiate the Google OAuth flow
-      final success = await supabase.auth.signInWithOAuth(
-        OAuthProvider.google,
-        // This URL must be added to your Google Cloud Console Authorized Redirect URIs
-        redirectTo: 'https://skvgbzftnbditpztqewl.supabase.co/auth/v1/callback',
+      // 1. Initialize the Native Google Sign-In
+      final GoogleSignIn googleSignIn = GoogleSignIn(
+        // This MUST be your Web Client ID (ending in .apps.googleusercontent.com)
+        // You can put multiple IDs separated by a space if needed, but Web is primary.
+        serverClientId: '358994083024-bn76a0pgeac7vndqan8u8l313scec8rd.apps.googleusercontent.com',
       );
 
-      if (success) {
-        // Once successful, navigate to Home
-        if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const HomeScreen()),
-          );
-        }
-      } else {
-        setState(() => _errorMessage = 'Login was cancelled.');
+      // 2. Show the native account selector
+      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+      
+      if (googleUser == null) {
+        // User closed the popup without selecting an account
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Login cancelled.';
+        });
+        return;
+      }
+
+      // 3. Get the authentication tokens
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      
+      final accessToken = googleAuth.accessToken;
+      final idToken = googleAuth.idToken;
+
+      if (idToken == null) {
+        throw Exception('No ID Token found. Check your Google Client ID configuration.');
+      }
+
+      // 4. Log into Supabase using the Google tokens
+      await supabase.auth.signInWithIdToken(
+        provider: OAuthProvider.google,
+        idToken: idToken,
+        accessToken: accessToken,
+      );
+
+      // 5. Navigate to Home
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+        );
       }
     } catch (e) {
-      setState(() => _errorMessage = 'Error: $e');
+      setState(() => _errorMessage = 'Google Login Failed: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -95,23 +121,20 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // Official Google 'G' Logo shape (using a custom icon)
                       Container(
                         width: 24,
                         height: 24,
                         decoration: const BoxDecoration(
                           shape: BoxShape.circle,
-                          color: Colors.white, // Base white
+                          color: Colors.white,
                         ),
                         child: const Center(
-                          // We use the text 'G' as a fallback for the logo
                           child: Text(
                             'G',
                             style: TextStyle(
-                              color: Colors.blueAccent, // Blue for Google
+                              color: Colors.blueAccent,
                               fontSize: 18,
                               fontWeight: FontWeight.w900,
-                              fontFamily: 'Roboto', // Standard font
                             ),
                           ),
                         ),
