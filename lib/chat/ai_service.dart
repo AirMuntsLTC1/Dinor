@@ -52,7 +52,9 @@ class DinorAI {
       if (response.status == 200 && response.data['reply'] != null) {
         return response.data['reply'];
       } else {
-        return "I'm having trouble thinking right now. (Error ${response.status})";
+        // Show the exact error from the backend
+        final errorMsg = response.data != null ? response.data.toString() : "Unknown error";
+        return "Backend Error: $errorMsg (Status ${response.status})";
       }
     } catch (e) {
       return "Oops, I lost my connection. Error: $e";
