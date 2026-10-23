@@ -24,65 +24,73 @@ class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final List<Message> _messages = [];
-  final GlobalKey _inputKey = GlobalKey(); // Used to track input position
+  final GlobalKey _inputKey = GlobalKey();
+  bool _isAiTyping = false;
 
   @override
   void initState() {
     super.initState();
     if (widget.isAi) {
-      _messages.add(Message("Hello! I am Dinor AI. How can I help you today?", false));
+      _messages.add(Message("Hello! I am Dinor AI. Ask me anything and I'll search the web.", false));
     }
   }
 
   void _sendMessage() {
     final rawText = _textController.text.trim();
     if (rawText.isEmpty) return;
-    
-    // Use C++ core to format the text
-    final text = DinorCore.load().formatMessage(rawText);
 
-    // 1. Get the position of the input field for the flying animation
+    // 1. Format via C++ safely (Fallback to raw text if C++ fails)
+    String text = rawText;
+    try {
+      text = DinorCore.load().formatMessage(rawText);
+    } catch (e) {
+      print("C++ Format failed, using raw text: $e");
+    }
+
+    // 2. Get input position for animation
     final RenderBox? inputBox = _inputKey.currentContext?.findRenderObject() as RenderBox?;
     final Offset startPosition = inputBox != null
         ? inputBox.localToGlobal(Offset.zero)
         : const Offset(0, 0);
 
-    // 2. Clear text immediately
+    // 3. Clear input field immediately
     _textController.clear();
 
-    // 3. Trigger the flying animation
+    // 4. Trigger animation
     _showFlyingMessage(text, startPosition);
 
-    // 4. Add the actual message after a tiny delay (so it looks like the flying text landed)
-    Future.delayed(const Duration(milliseconds: 300), () {
-      if (!mounted) return;
-      setState(() {
-        _messages.add(Message(text, true));
-      });
-      _scrollToBottom();
-
-      // 5. If it's the AI chat, trigger a response
-      if (widget.isAi) {
-        _triggerAiResponse(text);
-      }
-    });
-  }
-
-  void _triggerAiResponse(String userText) async {
-    // Show a "typing..." bubble while fetching
+    // 5. Add message to list instantly (don't wait for animation)
     setState(() {
-      _messages.add(Message("Searching the web...", false));
+      _messages.add(Message(text, true));
     });
     _scrollToBottom();
 
-    // Get response from our custom scraper AI
-    String response = await DinorAI.getResponse(userText);
-    if (!mounted) return;
+    // 6. Trigger AI Response if this is the AI chat
+    if (widget.isAi) {
+      _triggerAiResponse(text);
+    }
+  }
 
-    setState(() {
-      _messages.removeLast(); // Remove the "Searching..." text
-      _messages.add(Message(response, false));
-    });
+  void _triggerAiResponse(String userText) async {
+    setState(() => _isAiTyping = true);
+    _scrollToBottom();
+
+    try {
+      // Fetch from Web/C++ AI
+      String response = await DinorAI.getResponse(userText);
+      if (!mounted) return;
+
+      setState(() {
+        _isAiTyping = false;
+        _messages.add(Message(response, false));
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isAiTyping = false;
+        _messages.add(Message("Error connecting to AI: $e", false));
+      });
+    }
     _scrollToBottom();
   }
 
@@ -98,7 +106,6 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  // The Telegram-style "Flying" animation
   void _showFlyingMessage(String text, Offset startPos) {
     final overlay = Overlay.of(context);
     final overlayEntry = OverlayEntry(
@@ -106,15 +113,11 @@ class _ChatScreenState extends State<ChatScreen> {
         return _FlyingMessageWidget(
           text: text,
           startPosition: startPos,
-          onComplete: () {
-            // This is handled by the Stateful widget inside
-          },
+          onComplete: () {},
         );
       },
     );
-
     overlay.insert(overlayEntry);
-    // Remove from overlay after animation completes
     Future.delayed(const Duration(milliseconds: 400), () {
       overlayEntry.remove();
     });
@@ -137,8 +140,19 @@ class _ChatScreenState extends State<ChatScreen> {
             child: ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.all(16),
-              itemCount: _messages.length,
+              itemCount: _messages.length + (_isAiTyping ? 1 : 0),
               itemBuilder: (context, index) {
+                // Render Typing Indicator
+                if (index == _messages.length && _isAiTyping) {
+                  return const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: EdgeInsets.all(8.0),
+                      child: Text("Dinor AI is searching...", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
+                    ),
+                  );
+                }
+
                 final msg = _messages[index];
                 return Align(
                   alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -183,7 +197,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 children: [
                   Expanded(
                     child: Container(
-                      key: _inputKey, // Key for tracking position
+                      key: _inputKey,
                       decoration: BoxDecoration(
                         color: Colors.grey[100],
                         borderRadius: BorderRadius.circular(24),
@@ -197,7 +211,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           border: InputBorder.none,
                           contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                         ),
-                        onSubmitted: (_) => _sendMessage(),
+                        onSubmitted: (_) => _sendMessage(), // Triggers on keyboard enter
                       ),
                     ),
                   ),
@@ -206,7 +220,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     backgroundColor: brandBlue,
                     child: IconButton(
                       icon: const Icon(Icons.send, color: Colors.white, size: 20),
-                      onPressed: _sendMessage,
+                      onPressed: _sendMessage, // Triggers on button tap
                     ),
                   ),
                 ],
@@ -219,7 +233,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 }
 
-// Widget that handles the actual flying physics
+// The flying animation widget
 class _FlyingMessageWidget extends StatefulWidget {
   final String text;
   final Offset startPosition;
@@ -242,12 +256,8 @@ class _FlyingMessageWidgetState extends State<_FlyingMessageWidget> with SingleT
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 350),
-    );
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
     _animation = CurvedAnimation(parent: _controller, curve: Curves.easeInOutCubic);
-    
     _controller.forward().then((_) => widget.onComplete());
   }
 
@@ -259,45 +269,39 @@ class _FlyingMessageWidgetState extends State<_FlyingMessageWidget> with SingleT
 
   @override
   Widget build(BuildContext context) {
-    // Target position: top right (approximate location of sent messages)
     final screenSize = MediaQuery.of(context).size;
     final endPosition = Offset(screenSize.width - 100, screenSize.height * 0.2);
-    
-    // Calculate a curved path using a sine wave
     final controlPoint = Offset(
       widget.startPosition.dx + (endPosition.dx - widget.startPosition.dx) / 2 + 50,
-      widget.startPosition.dy - 150, // Arc upwards
+      widget.startPosition.dy - 150,
     );
 
     return AnimatedBuilder(
       animation: _animation,
       builder: (context, child) {
         final t = _animation.value;
-        
-        // Quadratic Bezier curve calculation
-        final x = pow(1 - t, 2) * widget.startPosition.dx + 
-                  2 * (1 - t) * t * controlPoint.dx + 
-                  pow(t, 2) * endPosition.dx;
-        final y = pow(1 - t, 2) * widget.startPosition.dy + 
-                  2 * (1 - t) * t * controlPoint.dy + 
-                  pow(t, 2) * endPosition.dy;
+        final x = pow(1 - t, 2) * widget.startPosition.dx + 2 * (1 - t) * t * controlPoint.dx + pow(t, 2) * endPosition.dx;
+        final y = pow(1 - t, 2) * widget.startPosition.dy + 2 * (1 - t) * t * controlPoint.dy + pow(t, 2) * endPosition.dy;
 
         return Positioned(
           left: x.toDouble(),
           top: y.toDouble(),
-          child: Opacity(
-            opacity: 1.0 - t, // Fade out as it reaches the top
-            child: Material(
-              color: Colors.transparent,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF229ED9),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Text(
-                  widget.text,
-                  style: const TextStyle(color: Colors.white, fontSize: 16),
+          // IgnorePointer ensures the animation doesn't block your clicks!
+          child: IgnorePointer( 
+            child: Opacity(
+              opacity: 1.0 - t,
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF229ED9),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    widget.text,
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                  ),
                 ),
               ),
             ),
