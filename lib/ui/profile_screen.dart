@@ -21,12 +21,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _signOut() async {
     await supabase.auth.signOut();
-    if (mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const Scaffold(body: Center(child: Text('Logged out')))),
-        (route) => false,
-      );
-    }
+    // The AuthGate in main.dart will automatically redirect to LoginScreen
   }
 
   @override
