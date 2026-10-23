@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'ui/login_screen.dart';
 import 'ui/home_screen.dart';
 import 'ui/dinor_theme.dart';
@@ -9,15 +8,10 @@ import 'ui/internet_banner.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Initialize local storage for Supabase
-  final prefs = await SharedPreferences.getInstance();
-
   await Supabase.initialize(
     url: 'https://skvgbzftnbditpztqewl.supabase.co',
     publishableKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNrdmdiemZ0bmJkaXRwenRxZXdsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI3NDA1NDEsImV4cCI6MjEwODMxNjU0MX0.zHDtiHxAUBb-n2HpXjBbOHaO58pp4SgF__r9zq5JmkM',
-    authOptions: FlutterAuthClientOptions(
-      localStorage: SharedPreferencesLocalStorage(prefs), // This saves the session!
-    ),
+    // Supabase automatically uses SharedPreferences on Android/iOS by default!
   );
   
   runApp(const DinorApp());
