@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:typed_data';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:photo_manager/photo_manager.dart';
 
@@ -14,6 +15,7 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
   final List<AssetEntity> _selectedMedia = [];
   bool _isLoading = true;
   bool _hasPermission = false;
+  final Map<String, Uint8List> _thumbnailCache = {};
   
   final TextEditingController _captionController = TextEditingController();
   final FocusNode _captionFocus = FocusNode();
@@ -47,6 +49,8 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
           _media = assets;
           _isLoading = false;
         });
+        // Pre-load all thumbnails into memory so they don't flicker
+        _preloadThumbnails(assets);
       } else {
         setState(() => _isLoading = false);
       }
@@ -55,6 +59,16 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
         _isLoading = false;
         _hasPermission = false;
       });
+    }
+  }
+
+  Future<void> _preloadThumbnails(List<AssetEntity> assets) async {
+    for (var asset in assets) {
+      final thumbData = await asset.thumbnailDataWithSize(const ThumbnailSize(200, 200));
+      if (thumbData != null) {
+        _thumbnailCache[asset.id] = thumbData;
+        if (mounted) setState(() {}); // Refresh UI as they load
+      }
     }
   }
 
@@ -179,13 +193,9 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
                                           color: Colors.grey[200],
                                         ),
                                         clipBehavior: Clip.hardEdge,
-                                        child: FutureBuilder<Widget>(
-                                          future: _buildThumbnail(asset),
-                                          builder: (context, snapshot) {
-                                            if (snapshot.hasData) return snapshot.data!;
-                                            return const Center(child: Icon(Icons.image, color: Colors.grey));
-                                          },
-                                        ),
+                                        child: _thumbnailCache.containsKey(asset.id)
+                                            ? Image.memory(_thumbnailCache[asset.id]!, fit: BoxFit.cover)
+                                            : const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
                                       ),
                                       
                                       // Selection Overlay
@@ -229,20 +239,17 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
                             // Preview of the first selected photo
                             Padding(
                               padding: const EdgeInsets.all(8.0),
-                              child: FutureBuilder<Widget>(
-                                future: _buildThumbnail(_selectedMedia.first),
-                                builder: (context, snapshot) {
-                                  return Container(
-                                    width: 40,
-                                    height: 40,
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(6),
-                                      color: Colors.grey[200],
-                                    ),
-                                    clipBehavior: Clip.hardEdge,
-                                    child: snapshot.hasData ? snapshot.data : const SizedBox(),
-                                  );
-                                },
+                              child: Container(
+                                width: 40,
+                                height: 40,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(6),
+                                  color: Colors.grey[200],
+                                ),
+                                clipBehavior: Clip.hardEdge,
+                                child: _thumbnailCache.containsKey(_selectedMedia.first.id)
+                                    ? Image.memory(_thumbnailCache[_selectedMedia.first.id]!, fit: BoxFit.cover)
+                                    : const SizedBox(),
                               ),
                             ),
                             // Caption Input
@@ -274,11 +281,4 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
     );
   }
 
-  Future<Widget> _buildThumbnail(AssetEntity asset) async {
-    final thumbData = await asset.thumbnailDataWithSize(const ThumbnailSize(200, 200));
-    if (thumbData != null) {
-      return Image.memory(thumbData, fit: BoxFit.cover);
-    }
-    return const Icon(Icons.broken_image);
-  }
 }
