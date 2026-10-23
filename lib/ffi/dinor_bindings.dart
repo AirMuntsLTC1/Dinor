@@ -13,6 +13,9 @@ typedef _SearchD = int Function(Pointer<Utf8>, Pointer<Utf8>);
 typedef _FormatC = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Int32);
 typedef _FormatD = int Function(Pointer<Utf8>, Pointer<Utf8>, int);
 
+typedef _AiExtractC = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Int32);
+typedef _AiExtractD = int Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, int);
+
 class DinorCore {
   final DynamicLibrary _lib;
   DinorCore._(this._lib);
@@ -48,6 +51,21 @@ class DinorCore {
   }
 
   // New: Format text using C++
+  String extractAiAnswer(String query, String webText) {
+    final fn = _lib.lookupFunction<_AiExtractC, _AiExtractD>('dinor_extract_web_answer');
+    final q = query.toNativeUtf8();
+    final w = webText.toNativeUtf8();
+    final out = calloc<Uint8>(512).cast<Utf8>(); // Max 512 bytes for answer
+    
+    final n = fn(q, w, out, 512);
+    final result = n < 0 ? '' : out.toDartString();
+    
+    calloc.free(q);
+    calloc.free(w);
+    calloc.free(out);
+    return result;
+  }
+
   String formatMessage(String text) {
     final fn = _lib.lookupFunction<_FormatC, _FormatD>('dinor_format_message');
     final input = text.toNativeUtf8();

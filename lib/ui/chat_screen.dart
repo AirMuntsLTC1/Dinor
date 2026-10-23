@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:math';
 import '../ffi/dinor_bindings.dart';
+import '../chat/ai_service.dart';
 
 class Message {
   final String text;
@@ -67,24 +68,22 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  void _triggerAiResponse(String userText) {
-    // Simulate AI thinking delay
-    Future.delayed(const Duration(seconds: 1), () {
-      if (!mounted) return;
-      String response = "I received your message: '$userText'. (Soon I will be connected to a real AI!)";
-      
-      // Simple logic for demonstration
-      if (userText.toLowerCase().contains("hello") || userText.toLowerCase().contains("hi")) {
-        response = "Hello there! How can I assist you today?";
-      } else if (userText.toLowerCase().contains("dinor")) {
-        response = "Dinor is a secure, fast chat system built with Flutter and C++!";
-      }
-
-      setState(() {
-        _messages.add(Message(response, false));
-      });
-      _scrollToBottom();
+  void _triggerAiResponse(String userText) async {
+    // Show a "typing..." bubble while fetching
+    setState(() {
+      _messages.add(Message("Searching the web...", false));
     });
+    _scrollToBottom();
+
+    // Get response from our custom scraper AI
+    String response = await DinorAI.getResponse(userText);
+    if (!mounted) return;
+
+    setState(() {
+      _messages.removeLast(); // Remove the "Searching..." text
+      _messages.add(Message(response, false));
+    });
+    _scrollToBottom();
   }
 
   void _scrollToBottom() {
