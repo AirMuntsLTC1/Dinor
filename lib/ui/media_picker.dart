@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'dart:typed_data';
-import 'dart:isolate';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'dinor_theme.dart';
@@ -42,25 +41,24 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
     if (status.isGranted || videoStatus.isGranted) {
       setState(() => _hasPermission = true);
       
-      // Move heavy loading to a background Isolate to prevent UI freezes
-      final assets = await Isolate.run(() async {
-        final paths = await PhotoManager.getAssetPathList(
-          type: RequestType.common,
-          onlyAll: true,
-        );
-        if (paths.isNotEmpty) {
-          return await paths.first.getAssetListPaged(page: 0, size: 100);
-        }
-        return <AssetEntity>[];
-      });
-
-      setState(() {
-        _media = assets;
-        _isLoading = false;
-      });
+      // Load directly (Isolate doesn't support photo_manager natively)
+      final paths = await PhotoManager.getAssetPathList(
+        type: RequestType.common,
+        onlyAll: true,
+      );
+      
+      if (paths.isNotEmpty) {
+        final assets = await paths.first.getAssetListPaged(page: 0, size: 100);
+        setState(() {
+          _media = assets;
+          _isLoading = false;
+        });
+        _preloadThumbnails(assets); // Re-added the caching call!
+      } else {
+        setState(() => _isLoading = false);
+      }
 
       // Pre-load thumbnails smoothly
-      _preloadThumbnails(assets);
     } else {
       setState(() {
         _isLoading = false;

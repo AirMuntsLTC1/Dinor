@@ -1,3 +1,4 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:html/parser.dart' as parser;
 import '../ffi/dinor_bindings.dart';
@@ -11,6 +12,12 @@ class DinorAI {
     }
     if (msg.contains('your name')) {
       return "I am Dinor AI, powered by a native C++ search engine. No external APIs!";
+    }
+
+    // Check internet before trying to search
+    final connectivityResult = await Connectivity().checkConnectivity();
+    if (connectivityResult.contains(ConnectivityResult.none)) {
+      return "I am currently offline. Please check your internet connection to search the web!";
     }
 
     try {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'dart:convert';
 import 'emoji_widget.dart';
 import 'dinor_theme.dart';
@@ -45,6 +46,7 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
   final String _apiKey = "RTUwFs8WOiFqRq0K9UBkWS0OlUy3tVza";
   List<dynamic> _gifs = [];
   bool _isGifLoading = false;
+  bool _hasInternet = true;
 
   @override
   void initState() {
@@ -53,7 +55,24 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
   }
 
   Future<void> _fetchGifs({String? query}) async {
-    setState(() => _isGifLoading = true);
+    // Check internet first
+    final connectivityResult = await Connectivity().checkConnectivity();
+    final isOffline = connectivityResult.contains(ConnectivityResult.none);
+
+    if (isOffline) {
+      setState(() {
+        _hasInternet = false;
+        _isGifLoading = false;
+        _gifs = [];
+      });
+      return;
+    } else {
+      setState(() {
+        _hasInternet = true;
+        _isGifLoading = true;
+      });
+    }
+
     final endpoint = query == null || query.isEmpty
         ? 'https://api.giphy.com/v1/gifs/trending?api_key=$_apiKey&limit=20&rating=g'
         : 'https://api.giphy.com/v1/gifs/search?api_key=$_apiKey&q=$query&limit=20&rating=g';
@@ -212,6 +231,20 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
   }
 
   Widget _buildGifGrid(ScrollController controller) {
+    if (!_hasInternet) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.wifi_off, size: 48, color: Colors.grey),
+            SizedBox(height: 16),
+            Text("No Internet Connection", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+            SizedBox(height: 8),
+            Text("Please connect to the internet to view GIFs.", style: TextStyle(color: Colors.grey, fontSize: 12)),
+          ],
+        ),
+      );
+    }
     if (_isGifLoading) return const Center(child: CircularProgressIndicator(color: Color(0xFF229ED9)));
     if (_gifs.isEmpty) return const Center(child: Text("No GIFs found", style: TextStyle(color: Colors.grey)));
 
