@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../ffi/dinor_bindings.dart';
+import 'chat_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -38,17 +39,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       backgroundColor: Colors.white,
-      
-      // Custom Header: Profile Picture + Search Bar
       body: SafeArea(
         child: Column(
           children: [
-            // 1. Top Header (Profile & Title)
+            // 1. Top Header
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Row(
                 children: [
-                  // Small Circle Profile Picture Placeholder
                   Container(
                     width: 40,
                     height: 40,
@@ -57,20 +55,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       shape: BoxShape.circle,
                       border: Border.all(color: brandBlue, width: 1.5),
                     ),
-                    child: const Icon(
-                      Icons.person,
-                      color: brandBlue,
-                      size: 24,
-                    ),
+                    child: const Icon(Icons.person, color: brandBlue, size: 24),
                   ),
                   const SizedBox(width: 12),
                   const Text(
                     'Dinor',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: brandBlue,
-                    ),
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: brandBlue),
                   ),
                   const Spacer(),
                   IconButton(
@@ -81,7 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            // 2. Rounded Search Bar
+            // 2. Search Bar
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: TextField(
@@ -93,7 +83,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   fillColor: Colors.grey[100],
                   contentPadding: const EdgeInsets.symmetric(vertical: 0),
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(30), // Rounded corners
+                    borderRadius: BorderRadius.circular(30),
                     borderSide: BorderSide.none,
                   ),
                 ),
@@ -102,7 +92,68 @@ class _HomeScreenState extends State<HomeScreen> {
 
             const SizedBox(height: 8),
 
-            // 3. Chat List
+            // 3. Custom AI Conversation Card
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ChatScreen(title: 'Dinor AI', isAi: true),
+                    ),
+                  );
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF229ED9), Color(0xFF24A1DE)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: brandBlue.withValues(alpha: 0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      const CircleAvatar(
+                        backgroundColor: Colors.white,
+                        child: Icon(Icons.smart_toy, color: Color(0xFF229ED9)),
+                      ),
+                      const SizedBox(width: 16),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Dinor AI Assistant',
+                              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              'Ask me anything!',
+                              style: TextStyle(color: Colors.white70, fontSize: 13),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(Icons.arrow_forward_ios, color: Colors.white.withValues(alpha: 0.7), size: 16),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // 4. Chat List
             Expanded(
               child: ListView.separated(
                 itemCount: _chats.length,
@@ -114,31 +165,26 @@ class _HomeScreenState extends State<HomeScreen> {
                       backgroundColor: brandBlue.withValues(alpha: 0.15),
                       child: Text(
                         chat['name']![0],
-                        style: const TextStyle(
-                          color: brandBlue,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold),
                       ),
                     ),
                     title: Text(chat['name']!, style: const TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: Text(
-                      chat['msg']!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: Text(
-                      chat['time']!,
-                      style: const TextStyle(fontSize: 12, color: Colors.black45),
-                    ),
+                    subtitle: Text(chat['msg']!, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    trailing: Text(chat['time']!, style: const TextStyle(fontSize: 12, color: Colors.black45)),
                     onTap: () {
-                      // TODO: Navigate to Chat Screen
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ChatScreen(title: chat['name']!),
+                        ),
+                      );
                     },
                   );
                 },
               ),
             ),
             
-            // 4. Native Core Status Footer
+            // 5. Native Core Status Footer
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 8),
