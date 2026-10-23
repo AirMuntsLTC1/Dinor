@@ -9,3 +9,6 @@
 
 # Keep Dinor's native FFI bridge
 -keep class com.dinor.dinor.** { *; }
+
+# Ignore missing Google Play Core classes (Fix for R8)
+-dontwarn com.google.android.play.core.**
