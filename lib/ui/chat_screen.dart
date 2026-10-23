@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:io';
+import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:photo_manager/photo_manager.dart';
 import '../ffi/dinor_bindings.dart';
@@ -151,11 +152,11 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  void _triggerAiResponse(String userText) async {
+  void _triggerAiResponse(String userText, {String? imageBase64}) async {
     setState(() => _isAiTyping = true);
     _scrollToBottom();
     try {
-      String response = await DinorAI.getResponse(userText);
+      String response = await DinorAI.getResponse(userText, imageBase64: imageBase64);
       if (!mounted) return;
       setState(() {
         _isAiTyping = false;
