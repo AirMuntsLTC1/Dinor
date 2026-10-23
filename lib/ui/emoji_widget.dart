@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:math';
 
 class AnimatedEmoji extends StatefulWidget {
   final String emoji;
@@ -61,7 +60,7 @@ class _AnimatedEmojiState extends State<AnimatedEmoji> with SingleTickerProvider
         builder: (context, child) {
           return Transform(
             transform: Matrix4.identity()
-              ..scale(_scaleAnimation.value)
+              ..scaleByDouble(_scaleAnimation.value, _scaleAnimation.value, _scaleAnimation.value, 1.0)
               ..rotateZ(_rotateAnimation.value),
             alignment: Alignment.center,
             child: Container(
