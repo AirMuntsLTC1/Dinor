@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
@@ -43,6 +44,9 @@ class _ChatScreenState extends State<ChatScreen> {
   final List<Message> _messages = [];
   final GlobalKey _inputKey = GlobalKey();
   bool _isAiTyping = false;
+  Message? _selectedMessage;
+  int? _selectedMessageIndex;
+  OverlayEntry? _menuOverlay;
   
 
   final supabase = Supabase.instance.client;
@@ -77,17 +81,24 @@ class _ChatScreenState extends State<ChatScreen> {
         callback: (payload) {
           final newMsg = payload.newRecord;
           if (mounted && newMsg['conversation_id'] == widget.conversationId) {
-            setState(() {
-              _messages.add(Message(
-                newMsg['id'].toString(),
-                newMsg['content'],
-                newMsg['sender_id'] == _currentUserId,
-                isImage: newMsg['is_image'] ?? false,
-                isRead: newMsg['is_read'] ?? false,
-              ));
-            });
-            _scrollToBottom();
-            if (widget.conversationId != null) ChatService.markAsRead(widget.conversationId!);
+            // Check if we already have this message in our list (prevents double-sending)
+            final exists = _messages.any((m) => m.id == newMsg['id'].toString());
+            if (!exists) {
+              setState(() {
+                _messages.add(Message(
+                  newMsg['id'].toString(),
+                  newMsg['content'],
+                  newMsg['sender_id'] == _currentUserId,
+                  isImage: newMsg['is_image'] ?? false,
+                  isRead: newMsg['is_read'] ?? false,
+                ));
+              });
+              _scrollToBottom();
+            }
+            // Always mark as read when a new message arrives
+            if (widget.conversationId != null && newMsg['sender_id'] != _currentUserId) {
+              ChatService.markAsRead(widget.conversationId!);
+            }
           }
         }
       ).subscribe();
@@ -222,6 +233,102 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
 
+
+  void _showMessageMenu(BuildContext context, int index, Message msg) {
+    _closeMessageMenu();
+    final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final RenderBox bubbleBox = context.findRenderObject() as RenderBox;
+    final Offset position = bubbleBox.localToGlobal(Offset.zero, ancestor: overlay);
+
+    setState(() {
+      _selectedMessage = msg;
+      _selectedMessageIndex = index;
+    });
+
+    _menuOverlay = OverlayEntry(
+      builder: (context) {
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: _closeMessageMenu,
+                behavior: HitTestBehavior.translucent,
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Positioned(
+              top: position.dy - 50,
+              left: msg.isMe ? position.dx - 60 : position.dx,
+              child: TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0.0, end: 1.0),
+                duration: const Duration(milliseconds: 150),
+                curve: Curves.easeOutBack,
+                builder: (context, val, child) {
+                  return Transform.scale(
+                    scale: val,
+                    alignment: msg.isMe ? Alignment.bottomRight : Alignment.bottomLeft,
+                    child: child,
+                  );
+                },
+                child: Material(
+                  color: Colors.transparent,
+                  child: Container(
+                    height: 40,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: DinorTheme.surfaceDark,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: DinorTheme.softShadow,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.arrow_forward, color: Colors.white70, size: 20),
+                          onPressed: _closeMessageMenu,
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.copy, color: Colors.white70, size: 20),
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: msg.text));
+                            _closeMessageMenu();
+                          },
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
+                          onPressed: () {
+                            setState(() => _messages.removeAt(index));
+                            _closeMessageMenu();
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    final overlayState = Overlay.of(context);
+    Future.delayed(const Duration(milliseconds: 50), () {
+      if (mounted && _menuOverlay != null) overlayState.insert(_menuOverlay!);
+    });
+  }
+
+  void _closeMessageMenu() {
+    if (_menuOverlay != null) {
+      _menuOverlay!.remove();
+      _menuOverlay = null;
+      setState(() {
+        _selectedMessage = null;
+        _selectedMessageIndex = null;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     const Color brandBlue = Color(0xFF229ED9);
@@ -244,11 +351,29 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 child: Row(
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back, color: Colors.white, size: 22),
-                      onPressed: () => Navigator.pop(context),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 250),
+                      transitionBuilder: (Widget child, Animation<double> animation) {
+                        return RotationTransition(
+                          turns: animation,
+                          child: ScaleTransition(scale: animation, child: child),
+                        );
+                      },
+                      child: _selectedMessage != null
+                          ? IconButton(
+                              key: const ValueKey('close_button'),
+                              icon: const Icon(Icons.close, color: Colors.white, size: 22),
+                              onPressed: _closeMessageMenu,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            )
+                          : IconButton(
+                              key: const ValueKey('back_button'),
+                              icon: const Icon(Icons.arrow_back, color: Colors.white, size: 22),
+                              onPressed: () => Navigator.pop(context),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
                     ),
                     const SizedBox(width: 8),
                     if (widget.isAi)
@@ -335,7 +460,19 @@ class _ChatScreenState extends State<ChatScreen> {
                           ),
                   );
 
-                final interactiveBubble = messageBubble;
+                final interactiveBubble = Builder(
+                  builder: (bubbleContext) {
+                    return GestureDetector(
+                      onLongPress: () => _showMessageMenu(bubbleContext, index, msg),
+                      child: AnimatedScale(
+                        scale: _selectedMessageIndex == index ? 1.1 : 1.0,
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeOutBack,
+                        child: messageBubble,
+                      ),
+                    );
+                  }
+                );
 
                 return Align(
                   alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -347,9 +484,10 @@ class _ChatScreenState extends State<ChatScreen> {
           
           // Chat Composer
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.only(left: 12, right: 12, bottom: 12, top: 4),
             decoration: const BoxDecoration(color: Colors.transparent),
             child: SafeArea(
+              top: false,
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [

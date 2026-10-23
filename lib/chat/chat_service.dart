@@ -16,7 +16,6 @@ class ChatService {
   static Future<String> getOrCreateConversation(String otherUserId) async {
     final myId = supabase.auth.currentUser!.id;
     
-    // 1. Try to get existing conversation fast
     final existing = await supabase
         .from('conversations')
         .select('id')
@@ -25,7 +24,6 @@ class ChatService {
 
     if (existing != null) return existing['id'];
 
-    // 2. Create new conversation
     final newConv = await supabase
         .from('conversations')
         .insert({'user1_id': myId, 'user2_id': otherUserId})
@@ -38,18 +36,30 @@ class ChatService {
   static Future<List<Map<String, dynamic>>> getMyConversations() async {
     final myId = supabase.auth.currentUser!.id;
     
+    // 1. Get conversations with joined users
     final response = await supabase
         .from('conversations')
-        .select('''
-          *,
-          user1:profiles!conversations_user1_id_fkey(*),
-          user2:profiles!conversations_user2_id_fkey(*),
-          latest_message:messages!messages_conversation_id_fkey(content, is_image)
-        ''')
+        .select('*, user1:profiles!conversations_user1_id_fkey(*), user2:profiles!conversations_user2_id_fkey(*)')
         .or('user1_id.eq.$myId,user2_id.eq.$myId')
         .order('last_message_time', ascending: false);
         
-    return List<Map<String, dynamic>>.from(response);
+    final List<Map<String, dynamic>> conversations = List<Map<String, dynamic>>.from(response);
+
+    // 2. For each conversation, fetch the unread count and the latest unread message (if any)
+    for (var conv in conversations) {
+      final unreadMessages = await supabase
+          .from('messages')
+          .select('content, is_image')
+          .eq('conversation_id', conv['id'])
+          .neq('sender_id', myId)
+          .eq('is_read', false)
+          .order('created_at', ascending: false);
+
+      conv['unread_count'] = unreadMessages.length;
+      conv['latest_unread'] = unreadMessages.isNotEmpty ? unreadMessages.first : null;
+    }
+
+    return conversations;
   }
 
   static Future<void> markAsRead(String conversationId) async {
@@ -59,15 +69,5 @@ class ChatService {
         .eq('conversation_id', conversationId)
         .neq('sender_id', supabase.auth.currentUser!.id)
         .eq('is_read', false);
-  }
-
-  static Future<int> getUnreadCount(String conversationId) async {
-    final response = await supabase
-        .from('messages')
-        .select()
-        .eq('conversation_id', conversationId)
-        .neq('sender_id', supabase.auth.currentUser!.id)
-        .eq('is_read', false);
-    return response.length;
   }
 }

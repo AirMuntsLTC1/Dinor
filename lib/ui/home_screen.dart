@@ -190,9 +190,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     final otherName = (otherUser != null && otherUser['username'] != null) ? otherUser['username'] : 'Unknown';
                     final otherId = otherUser != null ? otherUser['id'] : '';
                     
-                    // Fetch latest message
-                    final latestMsgList = conv['latest_message'];
-                    final latestMsg = (latestMsgList != null && latestMsgList.isNotEmpty) ? latestMsgList[0] : null;
                     
                     return Container(
                       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -211,8 +208,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            // 1. Thumbnail for Images / Videos
-                            if (latestMsg != null && latestMsg['is_image'] == true)
+                            // 1. Thumbnail (ONLY show if there is an unread image/video)
+                            if (conv['latest_unread'] != null && conv['latest_unread']['is_image'] == true)
                               Padding(
                                 padding: const EdgeInsets.only(right: 8.0),
                                 child: ClipRRect(
@@ -221,14 +218,14 @@ class _HomeScreenState extends State<HomeScreen> {
                                     alignment: Alignment.center,
                                     children: [
                                       CachedNetworkImage(
-                                        imageUrl: latestMsg['content'],
+                                        imageUrl: conv['latest_unread']['content'],
                                         width: 40,
                                         height: 40,
                                         fit: BoxFit.cover,
                                         placeholder: (c, u) => Container(width: 40, height: 40, color: Colors.grey[800]),
                                         errorWidget: (c, u, e) => Container(width: 40, height: 40, color: Colors.grey[800], child: const Icon(Icons.broken_image, size: 16)),
                                       ),
-                                      if (latestMsg['content'].toString().contains('.mp4') || latestMsg['content'].toString().contains('video'))
+                                      if (conv['latest_unread']['content'].toString().contains('.mp4') || conv['latest_unread']['content'].toString().contains('video'))
                                         Container(
                                           padding: const EdgeInsets.all(4),
                                           decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.5), shape: BoxShape.circle),
@@ -239,16 +236,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                               ),
                             
-                            // 2. Unread Badge
-                            FutureBuilder<int>(
-                              future: ChatService.getUnreadCount(conv['id']),
-                              builder: (context, snapshot) {
-                                if (snapshot.hasData && snapshot.data! > 0) {
-                                  return Container(padding: const EdgeInsets.all(6), decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle), child: Text(snapshot.data.toString(), style: const TextStyle(color: Colors.white, fontSize: 12)));
-                                }
-                                return const SizedBox.shrink();
-                              },
-                            ),
+                            // 2. Unread Badge (Using pre-fetched count)
+                            if ((conv['unread_count'] ?? 0) > 0)
+                              Container(
+                                padding: const EdgeInsets.all(6), 
+                                decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle), 
+                                child: Text(conv['unread_count'].toString(), style: const TextStyle(color: Colors.white, fontSize: 12))
+                              ),
                           ],
                         ),
                         onTap: () => _openChat(otherId, otherName),
