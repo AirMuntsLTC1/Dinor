@@ -118,6 +118,20 @@ class _LoginScreenState extends State<LoginScreen> {
       // Establish a persistent, real Supabase Auth session.
       await _supabase.auth.setSession(data['refresh_token'] as String);
 
+      // Automatically create a profile for the user if it doesn't exist
+      final user = _supabase.auth.currentUser;
+      if (user != null) {
+        final existingProfile = await _supabase.from('profiles').select().eq('id', user.id).maybeSingle();
+        if (existingProfile == null) {
+          // Use the email prefix as the default username (e.g., 'john' from 'john@gmail.com')
+          final defaultUsername = email.split('@')[0];
+          await _supabase.from('profiles').insert({
+            'id': user.id,
+            'username': defaultUsername,
+          });
+        }
+      }
+
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const HomeScreen()),

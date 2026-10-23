@@ -47,8 +47,13 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     setState(() => _isSearching = true);
-    final results = await ChatService.searchUsers(query);
-    setState(() => _searchResults = results);
+    try {
+      final results = await ChatService.searchUsers(query);
+      setState(() => _searchResults = results);
+    } catch (e) {
+      debugPrint("Search error: $e");
+      setState(() => _searchResults = []);
+    }
   }
 
   Future<void> _openChat(String otherUserId, String name) async {
