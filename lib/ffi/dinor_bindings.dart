@@ -16,6 +16,12 @@ typedef _FormatD = int Function(Pointer<Utf8>, Pointer<Utf8>, int);
 typedef _AiExtractC = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Int32);
 typedef _AiExtractD = int Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, int);
 
+typedef _SanitizeC = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Int32);
+typedef _SanitizeD = int Function(Pointer<Utf8>, Pointer<Utf8>, int);
+
+typedef _HashC = Int32 Function(Pointer<Utf8>);
+typedef _HashD = int Function(Pointer<Utf8>);
+
 class DinorCore {
   final DynamicLibrary _lib;
   DinorCore._(this._lib);
@@ -63,6 +69,25 @@ class DinorCore {
     calloc.free(q);
     calloc.free(w);
     calloc.free(out);
+    return result;
+  }
+
+  String sanitizeInput(String text) {
+    final fn = _lib.lookupFunction<_SanitizeC, _SanitizeD>('dinor_sanitize_input');
+    final input = text.toNativeUtf8();
+    final out = calloc<Uint8>(text.length + 2).cast<Utf8>();
+    final n = fn(input, out, text.length + 2);
+    final result = n < 0 ? text : out.toDartString();
+    calloc.free(input);
+    calloc.free(out);
+    return result;
+  }
+
+  int calculateHash(String text) {
+    final fn = _lib.lookupFunction<_HashC, _HashD>('dinor_calculate_hash');
+    final input = text.toNativeUtf8();
+    final result = fn(input);
+    calloc.free(input);
     return result;
   }
 

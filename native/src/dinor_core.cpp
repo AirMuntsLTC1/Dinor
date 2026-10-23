@@ -9,7 +9,7 @@
 extern "C" {
 
 const char* dinor_version() {
-    return "Dinor 0.3.0 (AI Core)";
+    return "Dinor 0.4.0 (Turbo Core)";
 }
 
 int dinor_encrypt(const char* plaintext, char* out, int out_len) {
@@ -49,32 +49,25 @@ int dinor_format_message(const char* input, char* out, int out_len) {
     return result.length();
 }
 
-// AI Logic: Find the sentence in the web text that best matches the user's query
 int dinor_extract_web_answer(const char* query, const char* html_text, char* out, int out_len) {
     std::string text(html_text);
     std::string q(query);
     std::string best_sentence = "";
     int max_matches = 0;
 
-    // Split HTML/text into sentences (naive splitting by punctuation)
     std::stringstream ss(text);
     std::string sentence;
-    
-    // Clean the query into words
     std::vector<std::string> keywords;
     std::stringstream qss(q);
     std::string word;
     while (qss >> word) {
-        // Remove punctuation from keyword
         word.erase(std::remove_if(word.begin(), word.end(), ::ispunct), word.end());
         if (word.length() > 2) keywords.push_back(word);
     }
 
     while (std::getline(ss, sentence, '.')) {
-        // Trim leading spaces
         sentence.erase(0, sentence.find_first_not_of(" \n\r\t"));
         sentence.erase(sentence.find_last_not_of(" \n\r\t") + 1);
-
         if (sentence.length() < 20 || sentence.length() > 300) continue;
 
         int matches = 0;
@@ -88,11 +81,32 @@ int dinor_extract_web_answer(const char* query, const char* html_text, char* out
         }
     }
 
-    if (best_sentence.empty()) return -1; // No good sentence found
-
+    if (best_sentence.empty()) return -1;
     if (best_sentence.length() + 1 > out_len) return -1;
     strcpy(out, best_sentence.c_str());
     return best_sentence.length();
+}
+
+// NEW: Removes null bytes, tabs, and trailing newlines safely in C++
+int dinor_sanitize_input(const char* input, char* out, int out_len) {
+    int j = 0;
+    for (int i = 0; input[i] != '\0' && j < out_len - 1; ++i) {
+        if (input[i] != '\0' && input[i] != '\r' && input[i] != '\t') {
+            out[j++] = input[i];
+        }
+    }
+    out[j] = '\0';
+    return j;
+}
+
+// NEW: Fast string hashing for caching/IDs
+int dinor_calculate_hash(const char* text) {
+    unsigned long hash = 5381;
+    int c;
+    while ((c = *text++)) {
+        hash = ((hash << 5) + hash) + c; // hash * 33 + c
+    }
+    return (int)(hash & 0x7FFFFFFF); // Ensure positive integer
 }
 
 }

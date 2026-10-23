@@ -53,10 +53,12 @@ class _ChatScreenState extends State<ChatScreen> {
     final rawText = _textController.text.trim();
     if (rawText.isEmpty) return;
 
-    // 1. Format via C++ safely
+    // 1. Format and sanitize via C++ safely
     String text = rawText;
     try {
-      text = DinorCore.load().formatMessage(rawText);
+      final core = DinorCore.load();
+      final sanitized = core.sanitizeInput(rawText);
+      text = core.formatMessage(sanitized);
     } catch (e) {
       debugPrint("C++ Format failed, using raw text: $e");
     }
