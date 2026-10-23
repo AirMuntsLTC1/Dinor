@@ -52,9 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
         onMessagesTap: () => setState(() => _drawerPage = 0),
       ),
       body: SafeArea(
-        child: _currentIndex == 3
-          ? const ProfileScreen() // Show Profile when index is 3
-          : _drawerPage == 0 
+        child: _drawerPage == 0 
           ? Column(
           children: [
             // 1. Top Header
@@ -214,7 +212,18 @@ class _HomeScreenState extends State<HomeScreen> {
             CustomBottomNav(
               currentIndex: _currentIndex,
               onTap: (index) {
-                setState(() => _currentIndex = index);
+                if (index == 3) {
+                  // Push the ProfileScreen as a new route so the phone's back button works
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const ProfileScreen()),
+                  ).then((_) {
+                    // When we come back, reset the nav index to Chats
+                    setState(() => _currentIndex = 0);
+                  });
+                } else {
+                  setState(() => _currentIndex = index);
+                }
               },
             ),
 
