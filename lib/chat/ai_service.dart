@@ -19,15 +19,23 @@ class DinorAI {
         },
       );
 
+      // Safely extract the reply
       if (response.status == 200 && response.data != null) {
-        final reply = response.data['reply'];
-        if (reply != null && reply is String && reply.trim().isNotEmpty) {
-          return reply;
+        final data = response.data;
+        
+        // If it's a Map, look for the 'reply' key
+        if (data is Map && data['reply'] != null) {
+          return data['reply'].toString();
+        } 
+        // If it's a String, just return it
+        else if (data is String) {
+          return data;
         }
       }
-      return "I couldn't process that image. Please try again.";
+      
+      return "I couldn't generate a response. Please try again. (Status: ${response.status})";
     } catch (e) {
-      return "Connection error: $e";
+      return "Connection error: ${e.toString()}";
     }
   }
 }
