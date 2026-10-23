@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'ui/home_screen.dart';
 import 'ui/dinor_theme.dart';
+import 'ui/internet_banner.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,7 +20,8 @@ class DinorApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return InternetBanner(
+      child: MaterialApp(
       title: 'Dinor',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -53,7 +55,8 @@ class DinorApp extends StatelessWidget {
           foregroundColor: Colors.white,
         ),
       ),
-      home: const HomeScreen(),
+        home: const HomeScreen(),
+      ),
     );
   }
 }
