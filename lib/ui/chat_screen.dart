@@ -574,18 +574,36 @@ class _ChatScreenState extends State<ChatScreen> {
                                     final newText = _textController.text + emoji;
                                     _textController.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: newText.length));
                                   },
-                                  onGifSelected: (url) {
-                                    Navigator.pop(context);
+                                  onGifSelected: (url) async {
+                                    Navigator.pop(context); // Close the picker
+                                    
                                     if (widget.isAi) {
-                                       setState(() => _messages.add(Message(DateTime.now().toString(), url, true, isImage: true)));
-                                    } else if (_currentUserId != null) {
-                                       supabase.from('messages').insert({
-                                         'sender_id': _currentUserId,
-                                         'content': url,
-                                         'is_image': true,
-                                       });
+                                      setState(() {
+                                        _messages.add(Message(DateTime.now().toString(), url, true, isImage: true));
+                                      });
+                                      _scrollToBottom();
+                                    } else if (_currentUserId != null && widget.conversationId != null) {
+                                      try {
+                                        // Save the GIF URL to the database
+                                        await supabase.from('messages').insert({
+                                          'sender_id': _currentUserId,
+                                          'content': url,
+                                          'is_image': true,
+                                          'conversation_id': widget.conversationId,
+                                          'is_read': false,
+                                        });
+                                        
+                                        // Update the conversation last message
+                                        await supabase.from('conversations').update({
+                                          'last_message': '🎬 GIF',
+                                          'last_message_time': DateTime.now().toUtc().toIso8601String(),
+                                        }).eq('id', widget.conversationId!);
+                                        
+                                        _scrollToBottom();
+                                      } catch (e) {
+                                        debugPrint("Error sending GIF: $e");
+                                      }
                                     }
-                                    _scrollToBottom();
                                   },
                                 ),
                               );
