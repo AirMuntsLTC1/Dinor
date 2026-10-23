@@ -3,6 +3,7 @@ import '../ffi/dinor_bindings.dart';
 import 'chat_screen.dart';
 import 'ai_avatar.dart';
 import 'bottom_nav.dart';
+import 'dinor_theme.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -41,7 +42,7 @@ class _HomeScreenState extends State<HomeScreen> {
     const Color brandBlue = Color(0xFF229ED9);
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: DinorTheme.bgLight,
       body: SafeArea(
         child: Column(
           children: [
@@ -77,17 +78,23 @@ class _HomeScreenState extends State<HomeScreen> {
             // 2. Search Bar
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: TextField(
-                decoration: InputDecoration(
-                  hintText: 'Search messages...',
-                  hintStyle: const TextStyle(color: Colors.black45),
-                  prefixIcon: const Icon(Icons.search, color: Colors.black45),
-                  filled: true,
-                  fillColor: Colors.grey[100],
-                  contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(30),
-                    borderSide: BorderSide.none,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: DinorTheme.surfaceWhite,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: DinorTheme.softShadow,
+                ),
+                child: TextField(
+                  decoration: InputDecoration(
+                    hintText: 'Search messages...',
+                    hintStyle: TextStyle(color: Colors.grey[400]),
+                    prefixIcon: Icon(Icons.search, color: Colors.grey[400]),
+                    filled: false,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide.none,
+                    ),
                   ),
                 ),
               ),
@@ -110,17 +117,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF229ED9), Color(0xFF24A1DE)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(16),
+                    gradient: DinorTheme.primaryGradient,
+                    borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
                         color: brandBlue.withValues(alpha: 0.3),
-                        blurRadius: 8,
-                        offset: const Offset(0, 4),
+                        blurRadius: 20,
+                        offset: const Offset(0, 8),
                       ),
                     ],
                   ),
@@ -157,10 +160,18 @@ class _HomeScreenState extends State<HomeScreen> {
             Expanded(
               child: ListView.separated(
                 itemCount: _chats.length,
-                separatorBuilder: (context, index) => const Divider(height: 1, indent: 72),
+                separatorBuilder: (context, index) => const SizedBox(height: 4),
                 itemBuilder: (context, index) {
                   final chat = _chats[index];
-                  return ListTile(
+                  return Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: DinorTheme.surfaceWhite,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: DinorTheme.softShadow,
+                    ),
+                    child: ListTile(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     leading: CircleAvatar(
                       backgroundColor: brandBlue.withValues(alpha: 0.15),
                       child: Text(
@@ -179,6 +190,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       );
                     },
+                  ),
                   );
                 },
               ),

@@ -9,6 +9,7 @@ import 'package:photo_manager/photo_manager.dart';
 import 'ai_avatar.dart';
 import 'media_picker.dart';
 import 'emoji_picker.dart';
+import 'dinor_theme.dart';
 
 class Message {
   final String text;
@@ -250,7 +251,7 @@ class _ChatScreenState extends State<ChatScreen> {
     const Color brandBlue = Color(0xFF229ED9);
 
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: DinorTheme.bgLight,
       appBar: AppBar(
         backgroundColor: brandBlue,
         foregroundColor: Colors.white,
@@ -299,20 +300,17 @@ class _ChatScreenState extends State<ChatScreen> {
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     decoration: BoxDecoration(
-                      color: msg.isMe ? brandBlue : Colors.white,
+                      gradient: msg.isMe ? DinorTheme.primaryGradient : null,
+                      color: msg.isMe ? null : DinorTheme.surfaceWhite,
                       borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(16),
-                        topRight: const Radius.circular(16),
-                        bottomLeft: msg.isMe ? const Radius.circular(16) : Radius.zero,
-                        bottomRight: msg.isMe ? Radius.zero : const Radius.circular(16),
+                        topLeft: const Radius.circular(20),
+                        topRight: const Radius.circular(20),
+                        bottomLeft: msg.isMe ? const Radius.circular(20) : const Radius.circular(4),
+                        bottomRight: msg.isMe ? const Radius.circular(4) : const Radius.circular(20),
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.05),
-                          blurRadius: 4,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
+                      boxShadow: msg.isMe ? [
+                         BoxShadow(color: brandBlue.withValues(alpha: 0.2), blurRadius: 8, offset: const Offset(0, 4))
+                      ] : DinorTheme.softShadow,
                     ),
                     child: msg.isImage
                         ? Column(
@@ -435,8 +433,9 @@ class _ChatScreenState extends State<ChatScreen> {
                       key: _inputKey,
                       margin: const EdgeInsets.symmetric(vertical: 6),
                       decoration: BoxDecoration(
-                        color: Colors.grey[100],
+                        color: DinorTheme.surfaceWhite,
                         borderRadius: BorderRadius.circular(24),
+                        boxShadow: DinorTheme.softShadow,
                       ),
                       child: TextField(
                         controller: _textController,

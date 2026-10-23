@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:isolate';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'dinor_theme.dart';
 
 class CustomMediaPicker extends StatefulWidget {
   const CustomMediaPicker({super.key});
@@ -115,7 +116,7 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
       builder: (context, scrollController) {
         return Container(
           decoration: const BoxDecoration(
-            color: Color(0xFF17212B), // Telegram Dark Mode Background
+            color: DinorTheme.surfaceWhite,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           // Padding uses MediaQuery.viewInsets.bottom so the caption bar rides the keyboard
@@ -144,7 +145,7 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
                     children: [
                       const Text(
                         'Gallery',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.black87),
                       ),
                       if (_selectedMedia.isNotEmpty)
                         ElevatedButton(
@@ -242,9 +243,9 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
                   duration: const Duration(milliseconds: 250),
                   curve: Curves.easeInOut,
                   height: _selectedMedia.isNotEmpty ? 60 : 0,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF17212B), // Match the background
-                    border: Border(top: BorderSide(color: Color(0xFF242F3D))),
+                  decoration: BoxDecoration(
+                    color: DinorTheme.surfaceWhite,
+                    border: Border(top: BorderSide(color: Colors.grey[200]!)),
                   ),
                   child: _selectedMedia.isNotEmpty
                       ? Row(
@@ -270,10 +271,10 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
                               child: TextField(
                                 controller: _captionController,
                                 focusNode: _captionFocus,
-                                style: const TextStyle(color: Colors.white),
+                                style: const TextStyle(color: Colors.black87),
                                 decoration: const InputDecoration(
                                   hintText: 'Add a caption...',
-                                  hintStyle: TextStyle(color: Colors.grey),
+                                  hintStyle: TextStyle(color: Colors.black45),
                                   border: InputBorder.none,
                                   contentPadding: EdgeInsets.symmetric(horizontal: 8),
                                 ),

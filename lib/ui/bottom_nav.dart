@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dinor_theme.dart';
 
 class CustomBottomNav extends StatelessWidget {
   final int currentIndex;
@@ -19,13 +20,7 @@ class CustomBottomNav extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(30),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
+        boxShadow: DinorTheme.softShadow,
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(30),

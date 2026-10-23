@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'emoji_widget.dart';
+import 'dinor_theme.dart';
 
 class CustomEmojiPicker extends StatefulWidget {
   final Function(String) onEmojiSelected;
@@ -89,7 +90,7 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
       builder: (context, scrollController) {
         return Container(
           decoration: const BoxDecoration(
-            color: Color(0xFF17212B), // Telegram Dark Mode
+            color: DinorTheme.surfaceWhite,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: Column(
@@ -101,7 +102,7 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: Colors.grey[600],
+                    color: Colors.grey[300],
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -124,7 +125,7 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
                 child: TextField(
                   controller: _searchController,
                   onChanged: _onSearchChanged,
-                  style: const TextStyle(color: Colors.white),
+                  style: const TextStyle(color: Colors.black87),
                   decoration: InputDecoration(
                     hintText: _currentTab == 0 ? 'Search emojis...' : 'Search GIFs...',
                     hintStyle: const TextStyle(color: Colors.grey),
