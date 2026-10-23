@@ -2,21 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:io';
-import 'dart:math';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:photo_manager/photo_manager.dart';
 import '../ffi/dinor_bindings.dart';
 import '../chat/ai_service.dart';
-import 'package:photo_manager/photo_manager.dart';
 import 'ai_avatar.dart';
 import 'media_picker.dart';
 import 'emoji_picker.dart';
 import 'dinor_theme.dart';
 
 class Message {
+  final String id;
   final String text;
   final bool isMe;
   final bool isImage;
   final String? caption;
-  Message(this.text, this.isMe, {this.isImage = false, this.caption});
+  Message(this.id, this.text, this.isMe, {this.isImage = false, this.caption});
 }
 
 class ChatScreen extends StatefulWidget {
@@ -41,70 +42,122 @@ class _ChatScreenState extends State<ChatScreen> {
   int? _selectedMessageIndex;
   OverlayEntry? _menuOverlay;
 
+  final supabase = Supabase.instance.client;
+  RealtimeChannel? _chatChannel;
+  String? _currentUserId;
+
   @override
   void initState() {
     super.initState();
     if (widget.isAi) {
-      _messages.add(Message("Hello! I am Dinor AI. Ask me anything and I'll search the web.", false));
+      _messages.add(Message('ai_1', "Hello! I am Dinor AI. Ask me anything and I'll search the web.", false));
+    } else {
+      _initSupabaseChat();
     }
   }
 
-  void _sendMessage() {
+  Future<void> _initSupabaseChat() async {
+    if (supabase.auth.currentUser == null) {
+      await supabase.auth.signInAnonymously();
+    }
+    _currentUserId = supabase.auth.currentUser?.id;
+    _fetchMessages();
+
+    _chatChannel = supabase.channel('public:messages')
+      .onPostgresChanges(
+        event: PostgresChangeEvent.insert,
+        schema: 'public',
+        table: 'messages',
+        callback: (payload) {
+          final newMsg = payload.newRecord;
+          if (mounted) {
+            setState(() {
+              _messages.add(Message(
+                newMsg['id'].toString(),
+                newMsg['content'],
+                newMsg['sender_id'] == _currentUserId,
+                isImage: newMsg['is_image'] ?? false,
+              ));
+            });
+            _scrollToBottom();
+          }
+        }
+      ).subscribe();
+  }
+
+  Future<void> _fetchMessages() async {
+    try {
+      final data = await supabase.from('messages').select().order('created_at', ascending: true);
+      setState(() {
+        _messages.clear();
+        for (var row in data) {
+          _messages.add(Message(
+            row['id'].toString(),
+            row['content'],
+            row['sender_id'] == _currentUserId,
+            isImage: row['is_image'] ?? false,
+          ));
+        }
+      });
+      _scrollToBottom();
+    } catch (e) {
+      debugPrint("Error fetching messages: $e");
+    }
+  }
+
+  @override
+  void dispose() {
+    _chatChannel?.unsubscribe();
+    _textController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _sendMessage() async {
     final rawText = _textController.text.trim();
     if (rawText.isEmpty) return;
 
-    // 1. Format and sanitize via C++ safely
     String text = rawText;
     try {
       final core = DinorCore.load();
-      final sanitized = core.sanitizeInput(rawText);
-      text = core.formatMessage(sanitized);
+      text = core.formatMessage(core.sanitizeInput(rawText));
     } catch (e) {
-      debugPrint("C++ Format failed, using raw text: $e");
+      debugPrint("C++ Format failed: $e");
     }
 
-    // 2. Get input position for animation
-    final RenderBox? inputBox = _inputKey.currentContext?.findRenderObject() as RenderBox?;
-    final Offset startPosition = inputBox != null
-        ? inputBox.localToGlobal(Offset.zero)
-        : const Offset(0, 0);
-
-    // 3. Clear input field
     _textController.clear();
 
-    // 4. Trigger animation
-    _showFlyingMessage(text, startPosition);
-
-    // 5. Add message
-    setState(() {
-      _messages.add(Message(text, true));
-    });
-    _scrollToBottom();
-
-    // 6. Trigger AI
     if (widget.isAi) {
+      setState(() => _messages.add(Message(DateTime.now().toString(), text, true)));
+      _scrollToBottom();
       _triggerAiResponse(text);
+    } else {
+      if (_currentUserId == null) return;
+      try {
+        await supabase.from('messages').insert({
+          'sender_id': _currentUserId,
+          'content': text,
+          'is_image': false,
+        });
+      } catch (e) {
+        debugPrint("Failed to send: $e");
+      }
     }
   }
 
   void _triggerAiResponse(String userText) async {
     setState(() => _isAiTyping = true);
     _scrollToBottom();
-
     try {
       String response = await DinorAI.getResponse(userText);
       if (!mounted) return;
-
       setState(() {
         _isAiTyping = false;
-        _messages.add(Message(response, false));
+        _messages.add(Message(DateTime.now().toString(), response, false));
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _isAiTyping = false;
-        _messages.add(Message("Error connecting to AI: $e", false));
-      });
+      setState(() => _isAiTyping = false);
     }
     _scrollToBottom();
   }
@@ -122,12 +175,9 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _showMessageMenu(BuildContext context, int index, Message msg) {
-    // Don't open multiple menus at once
     _closeMessageMenu();
-
     final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final RenderBox bubbleBox = context.findRenderObject() as RenderBox;
-    // Calculate the exact position of the bubble relative to the screen
     final Offset position = bubbleBox.localToGlobal(Offset.zero, ancestor: overlay);
 
     setState(() {
@@ -139,7 +189,6 @@ class _ChatScreenState extends State<ChatScreen> {
       builder: (context) {
         return Stack(
           children: [
-            // Invisible full-screen click catcher (delayed slightly to prevent instant close)
             Positioned.fill(
               child: GestureDetector(
                 onTap: _closeMessageMenu,
@@ -147,7 +196,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 child: const SizedBox.expand(),
               ),
             ),
-            // The Actual Menu
             Positioned(
               top: position.dy - 50,
               left: msg.isMe ? position.dx - 60 : position.dx,
@@ -168,43 +216,28 @@ class _ChatScreenState extends State<ChatScreen> {
                     height: 40,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: DinorTheme.surfaceDark,
                       borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.15),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        )
-                      ],
+                      boxShadow: DinorTheme.softShadow,
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Forward
                         IconButton(
-                          icon: const Icon(Icons.arrow_forward, color: Colors.black54, size: 20),
-                          onPressed: () {
-                            _closeMessageMenu();
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Forward clicked')));
-                          },
+                          icon: const Icon(Icons.arrow_forward, color: Colors.white70, size: 20),
+                          onPressed: () => _closeMessageMenu(),
                         ),
-                        // Copy
                         IconButton(
-                          icon: const Icon(Icons.copy, color: Colors.black54, size: 20),
+                          icon: const Icon(Icons.copy, color: Colors.white70, size: 20),
                           onPressed: () {
                             Clipboard.setData(ClipboardData(text: msg.text));
                             _closeMessageMenu();
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied to clipboard')));
                           },
                         ),
-                        // Delete
                         IconButton(
                           icon: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
                           onPressed: () {
-                            setState(() {
-                              _messages.removeAt(index);
-                            });
+                            setState(() => _messages.removeAt(index));
                             _closeMessageMenu();
                           },
                         ),
@@ -219,14 +252,9 @@ class _ChatScreenState extends State<ChatScreen> {
       },
     );
 
-    // Save the overlay state before the async gap
     final overlayState = Overlay.of(context);
-
-    // Delay insertion by 50ms so the long-press doesn't instantly trigger the dismiss tap
     Future.delayed(const Duration(milliseconds: 50), () {
-      if (mounted && _menuOverlay != null) {
-        overlayState.insert(_menuOverlay!);
-      }
+      if (mounted && _menuOverlay != null) overlayState.insert(_menuOverlay!);
     });
   }
 
@@ -241,77 +269,99 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  void _showFlyingMessage(String text, Offset startPos) {
-    final overlay = Overlay.of(context);
-    final overlayEntry = OverlayEntry(
-      builder: (context) {
-        return _FlyingMessageWidget(
-          text: text,
-          startPosition: startPos,
-          onComplete: () {},
-        );
-      },
-    );
-    overlay.insert(overlayEntry);
-    Future.delayed(const Duration(milliseconds: 400), () {
-      overlayEntry.remove();
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     const Color brandBlue = Color(0xFF229ED9);
 
     return Scaffold(
       backgroundColor: DinorTheme.bgDark,
-      appBar: AppBar(
-        backgroundColor: brandBlue,
-        foregroundColor: Colors.white,
-        leading: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 250),
-          transitionBuilder: (Widget child, Animation<double> animation) {
-            return RotationTransition(
-              turns: animation,
-              child: ScaleTransition(
-                scale: animation,
-                child: child,
-              ),
-            );
-          },
-          child: _selectedMessage != null
-              ? IconButton(
-                  key: const ValueKey('close_button'),
-                  icon: const Icon(Icons.close),
-                  onPressed: _closeMessageMenu,
-                )
-              : IconButton(
-                  key: const ValueKey('back_button'),
-                  icon: const Icon(Icons.arrow_back),
-                  onPressed: () => Navigator.pop(context),
-                ),
-        ),
-        title: Row(
-          children: [
-            if (widget.isAi && _selectedMessage == null) ...[
-              AnimatedAIAvatar(size: 32, isThinking: _isAiTyping),
-              const SizedBox(width: 12),
-            ],
-            if (_selectedMessage != null)
-              const Text('Message Options')
-            else
-              Text(widget.title),
-          ],
-        ),
-      ),
       body: Column(
         children: [
+          // Custom Floating Header
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 8, left: 12, right: 12),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: DinorTheme.surfaceDark,
+                  borderRadius: BorderRadius.circular(30),
+                  boxShadow: DinorTheme.softShadow,
+                ),
+                child: Row(
+                  children: [
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 250),
+                      transitionBuilder: (Widget child, Animation<double> animation) {
+                        return RotationTransition(
+                          turns: animation,
+                          child: ScaleTransition(scale: animation, child: child),
+                        );
+                      },
+                      child: _selectedMessage != null
+                          ? IconButton(
+                              key: const ValueKey('close_button'),
+                              icon: const Icon(Icons.close, color: Colors.white, size: 22),
+                              onPressed: _closeMessageMenu,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            )
+                          : IconButton(
+                              key: const ValueKey('back_button'),
+                              icon: const Icon(Icons.arrow_back, color: Colors.white, size: 22),
+                              onPressed: () => Navigator.pop(context),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                    ),
+                    const SizedBox(width: 8),
+
+                    if (widget.isAi)
+                      AnimatedAIAvatar(size: 36, isThinking: _isAiTyping)
+                    else
+                      CircleAvatar(
+                        radius: 18,
+                        backgroundColor: brandBlue.withValues(alpha: 0.2),
+                        child: Text(
+                          widget.title[0],
+                          style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                      ),
+                    const SizedBox(width: 10),
+
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _selectedMessage != null ? 'Message Options' : widget.title,
+                            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (_selectedMessage == null && widget.isAi)
+                            const Text('Online', style: TextStyle(color: brandBlue, fontSize: 12))
+                          else if (_selectedMessage == null)
+                            const Text('last seen recently', style: TextStyle(color: DinorTheme.textGrey, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          
+          // Chat Messages
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.all(16),
               // ignore: deprecated_member_use
-              cacheExtent: 1000.0, // Pre-renders messages slightly off-screen for smooth scrolling
-              addAutomaticKeepAlives: true, // Keeps images in memory while scrolling
+              cacheExtent: 1000.0,
+              addAutomaticKeepAlives: true,
               itemCount: _messages.length + (_isAiTyping ? 1 : 0),
               itemBuilder: (context, index) {
                 if (index == _messages.length && _isAiTyping) {
@@ -325,7 +375,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 }
 
                 final msg = _messages[index];
-                
                 Widget messageBubble = Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -349,46 +398,19 @@ class _ChatScreenState extends State<ChatScreen> {
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
                                 child: msg.text.startsWith('http')
-                                    ? Image.network(
-                                        msg.text,
-                                        width: 200,
-                                        fit: BoxFit.cover,
-                                        cacheWidth: 400, // Decodes at half-res to save RAM and GPU
-                                        errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, color: Colors.white),
-                                      )
-                                    : Image.file(
-                                        File(msg.text),
-                                        width: 200,
-                                        fit: BoxFit.cover,
-                                        cacheWidth: 400, // Decodes at half-res to save RAM and GPU
-                                        errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, color: Colors.white),
-                                      ),
+                                    ? Image.network(msg.text, width: 200, fit: BoxFit.cover, cacheWidth: 400, errorBuilder: (c, e, s) => const Icon(Icons.broken_image, color: Colors.white))
+                                    : Image.file(File(msg.text), width: 200, fit: BoxFit.cover, cacheWidth: 400, errorBuilder: (c, e, s) => const Icon(Icons.broken_image, color: Colors.white)),
                               ),
                               if (msg.caption != null && msg.caption!.isNotEmpty)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 8.0),
-                                  child: Text(
-                                    msg.caption!,
-                                    style: TextStyle(
-                                      fontFamily: 'Roboto',
-                                      color: msg.isMe ? Colors.white : Colors.white,
-                                      fontSize: 14,
-                                    ),
-                                  ),
+                                  child: Text(msg.caption!, style: const TextStyle(color: Colors.white, fontSize: 14)),
                                 ),
                             ],
                           )
-                        : Text(
-                            msg.text,
-                            style: TextStyle(
-                              fontFamily: 'Roboto',
-                              color: msg.isMe ? Colors.white : Colors.white,
-                              fontSize: 16,
-                            ),
-                          ),
+                        : Text(msg.text, style: const TextStyle(color: Colors.white, fontSize: 16)),
                   );
 
-                // Wrap in Builder to get the correct context for the specific bubble
                 final interactiveBubble = Builder(
                   builder: (bubbleContext) {
                     return GestureDetector(
@@ -403,15 +425,11 @@ class _ChatScreenState extends State<ChatScreen> {
                   }
                 );
 
-                // Wrap AI messages with the avatar
                 if (!msg.isMe && widget.isAi) {
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Padding(
-                        padding: EdgeInsets.only(top: 4, right: 8),
-                        child: AnimatedAIAvatar(size: 28),
-                      ),
+                      const Padding(padding: EdgeInsets.only(top: 4, right: 8), child: AnimatedAIAvatar(size: 28)),
                       Flexible(child: interactiveBubble),
                     ],
                   );
@@ -425,112 +443,121 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
           
+          // Chat Composer
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: const BoxDecoration(
-              color: Colors.transparent, // Removed the solid header background
-            ),
+            decoration: const BoxDecoration(color: Colors.transparent),
             child: SafeArea(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  // Media Icon
-                  IconButton(
-                    icon: const Icon(Icons.add_photo_alternate_outlined, color: DinorTheme.textGrey),
-                    onPressed: () async {
-                      final result = await showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        backgroundColor: Colors.transparent,
-                        builder: (context) => const CustomMediaPicker(),
-                      );
-
-                      if (result != null) {
-                        final List<AssetEntity> selectedAssets = result['media'];
-                        final String caption = result['caption'];
-
-                        // Add each selected image to the chat
-                        for (var asset in selectedAssets) {
-                          final file = await asset.file;
-                          if (file != null) {
-                            setState(() {
-                              _messages.add(Message(
-                                file.path, 
-                                true, 
-                                isImage: true, 
-                                caption: caption.isNotEmpty ? caption : null
-                              ));
-                            });
-                          }
-                        }
-                        _scrollToBottom();
-                      }
-                    },
-                  ),
-                  
-                  // Text Input
                   Expanded(
                     child: Container(
                       key: _inputKey,
-                      margin: const EdgeInsets.symmetric(vertical: 6),
+                      constraints: const BoxConstraints(minHeight: 40, maxHeight: 120),
                       decoration: BoxDecoration(
-                        color: DinorTheme.bgDark,
-                        borderRadius: BorderRadius.circular(24),
+                        color: DinorTheme.surfaceDark,
+                        borderRadius: BorderRadius.circular(20),
                         boxShadow: DinorTheme.softShadow,
                       ),
-                      child: TextField(
-                        controller: _textController,
-                        textCapitalization: TextCapitalization.sentences,
-                        decoration: const InputDecoration(
-                          hintText: 'Message',
-                          hintStyle: TextStyle(color: DinorTheme.textGrey),
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                        ),
-                        onSubmitted: (_) => _sendMessage(),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.add_photo_alternate_outlined, color: DinorTheme.textGrey, size: 22),
+                            onPressed: () async {
+                              final result = await showModalBottomSheet(
+                                context: context,
+                                isScrollControlled: true,
+                                backgroundColor: Colors.transparent,
+                                builder: (context) => const CustomMediaPicker(),
+                              );
+
+                              if (result != null) {
+                                final List<AssetEntity> selectedAssets = result['media'];
+                                final String caption = result['caption'];
+
+                                for (var asset in selectedAssets) {
+                                  final file = await asset.file;
+                                  if (file != null) {
+                                    if (widget.isAi) {
+                                      setState(() {
+                                        _messages.add(Message(DateTime.now().toString(), file.path, true, isImage: true, caption: caption.isNotEmpty ? caption : null));
+                                      });
+                                    } else if (_currentUserId != null) {
+                                      await supabase.from('messages').insert({
+                                        'sender_id': _currentUserId,
+                                        'content': file.path,
+                                        'is_image': true,
+                                      });
+                                    }
+                                  }
+                                }
+                                _scrollToBottom();
+                              }
+                            },
+                          ),
+                          
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              child: TextField(
+                                controller: _textController,
+                                textCapitalization: TextCapitalization.sentences,
+                                style: const TextStyle(color: Colors.white, fontSize: 15),
+                                decoration: const InputDecoration(
+                                  hintText: 'Message',
+                                  hintStyle: TextStyle(color: DinorTheme.textGrey),
+                                  border: InputBorder.none,
+                                  contentPadding: EdgeInsets.zero,
+                                  isDense: true,
+                                ),
+                                onSubmitted: (_) => _sendMessage(),
+                              ),
+                            ),
+                          ),
+                          
+                          IconButton(
+                            icon: const Icon(Icons.emoji_emotions_outlined, color: DinorTheme.textGrey, size: 22),
+                            onPressed: () {
+                              showModalBottomSheet(
+                                context: context,
+                                isScrollControlled: true,
+                                backgroundColor: Colors.transparent,
+                                builder: (context) => CustomEmojiPicker(
+                                  onEmojiSelected: (emoji) {
+                                    final newText = _textController.text + emoji;
+                                    _textController.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: newText.length));
+                                  },
+                                  onGifSelected: (url) {
+                                    Navigator.pop(context);
+                                    if (widget.isAi) {
+                                       setState(() => _messages.add(Message(DateTime.now().toString(), url, true, isImage: true)));
+                                    } else if (_currentUserId != null) {
+                                       supabase.from('messages').insert({
+                                         'sender_id': _currentUserId,
+                                         'content': url,
+                                         'is_image': true,
+                                       });
+                                    }
+                                    _scrollToBottom();
+                                  },
+                                ),
+                              );
+                            },
+                          ),
+                        ],
                       ),
                     ),
                   ),
                   
-                  // Emoji & GIF Icon (Merged)
-                  IconButton(
-                    icon: const Icon(Icons.emoji_emotions_outlined, color: DinorTheme.textGrey),
-                    onPressed: () {
-                      showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        backgroundColor: Colors.transparent,
-                        builder: (context) => CustomEmojiPicker(
-                          onEmojiSelected: (emoji) {
-                            // Add the emoji to the text field
-                            final newText = _textController.text + emoji;
-                            _textController.value = TextEditingValue(
-                              text: newText,
-                              selection: TextSelection.collapsed(offset: newText.length),
-                            );
-                          },
-                          onGifSelected: (url) {
-                            // Close picker and send GIF message
-                            Navigator.pop(context);
-                            setState(() {
-                              _messages.add(Message(url, true, isImage: true));
-                            });
-                            _scrollToBottom();
-                          },
-                        ),
-                      );
-                    },
-                  ),
-                  
+                  const SizedBox(width: 8),
 
-
-                  const SizedBox(width: 4),
-
-                  // Send Button
                   CircleAvatar(
                     backgroundColor: brandBlue,
+                    radius: 22,
                     child: IconButton(
-                      icon: const Icon(Icons.send, color: Colors.white, size: 20),
+                      icon: const Icon(Icons.arrow_upward, color: Colors.white, size: 22),
                       onPressed: _sendMessage,
                     ),
                   ),
@@ -540,83 +567,6 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _FlyingMessageWidget extends StatefulWidget {
-  final String text;
-  final Offset startPosition;
-  final VoidCallback onComplete;
-
-  const _FlyingMessageWidget({
-    required this.text,
-    required this.startPosition,
-    required this.onComplete,
-  });
-
-  @override
-  State<_FlyingMessageWidget> createState() => _FlyingMessageWidgetState();
-}
-
-class _FlyingMessageWidgetState extends State<_FlyingMessageWidget> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
-    _animation = CurvedAnimation(parent: _controller, curve: Curves.easeInOutCubic);
-    _controller.forward().then((_) => widget.onComplete());
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final screenSize = MediaQuery.of(context).size;
-    final endPosition = Offset(screenSize.width - 100, screenSize.height * 0.2);
-    final controlPoint = Offset(
-      widget.startPosition.dx + (endPosition.dx - widget.startPosition.dx) / 2 + 50,
-      widget.startPosition.dy - 150,
-    );
-
-    return AnimatedBuilder(
-      animation: _animation,
-      builder: (context, child) {
-        final t = _animation.value;
-        final x = pow(1 - t, 2) * widget.startPosition.dx + 2 * (1 - t) * t * controlPoint.dx + pow(t, 2) * endPosition.dx;
-        final y = pow(1 - t, 2) * widget.startPosition.dy + 2 * (1 - t) * t * controlPoint.dy + pow(t, 2) * endPosition.dy;
-
-        return Positioned(
-          left: x.toDouble(),
-          top: y.toDouble(),
-          child: IgnorePointer(
-            child: Opacity(
-              opacity: 1.0 - t,
-              child: Material(
-                color: Colors.transparent,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF229ED9),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Text(
-                    widget.text,
-                    style: const TextStyle(color: Colors.white, fontSize: 16),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 }
