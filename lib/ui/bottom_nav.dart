@@ -16,26 +16,30 @@ class CustomBottomNav extends StatelessWidget {
     const Color brandBlue = Color(0xFF229ED9);
 
     return Container(
-      // Small margins for the floating pill
-      margin: const EdgeInsets.only(left: 20, right: 20, bottom: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+      margin: const EdgeInsets.only(left: 40, right: 40, bottom: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
         color: DinorTheme.surfaceDark,
         borderRadius: BorderRadius.circular(30),
         boxShadow: DinorTheme.softShadow,
       ),
+      // Use a Row with spaceEvenly and fixed widths to keep gaps small
       child: Row(
-        // This is the magic fix: It forces each item to take equal space
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          Expanded(child: _buildNavItem(0, Icons.chat_bubble, Icons.chat_bubble_outline, 'Chats')),
-          Expanded(child: _buildNavItem(1, Icons.people, Icons.people_outline, 'Friends')),
-          Expanded(child: _buildNavItem(2, Icons.settings, Icons.settings_outlined, 'Settings')),
+          _buildNavItem(0, Icons.chat_bubble, Icons.chat_bubble_outline, 'Chats'),
+          const SizedBox(width: 12), // Tiny gap
+          _buildNavItem(1, Icons.people, Icons.people_outline, 'Friends'),
+          const SizedBox(width: 12), // Tiny gap
+          _buildNavItem(2, Icons.settings, Icons.settings_outlined, 'Settings'),
+          const SizedBox(width: 12), // Tiny gap
           
           // Profile Item (Custom Circle)
-          Expanded(
-            child: GestureDetector(
-              onTap: () => onTap(3),
-              behavior: HitTestBehavior.opaque,
+          GestureDetector(
+            onTap: () => onTap(3),
+            behavior: HitTestBehavior.opaque,
+            child: SizedBox(
+              width: 50, // Fixed width for the profile circle
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -82,27 +86,30 @@ class CustomBottomNav extends StatelessWidget {
     return GestureDetector(
       onTap: () => onTap(index),
       behavior: HitTestBehavior.opaque,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            isSelected ? activeIcon : inactiveIcon,
-            color: isSelected ? brandBlue : DinorTheme.textGrey,
-            size: 24,
-          ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+      child: SizedBox(
+        width: 50, // Fixed width for each item so they stay tight
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              isSelected ? activeIcon : inactiveIcon,
               color: isSelected ? brandBlue : DinorTheme.textGrey,
+              size: 24,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                color: isSelected ? brandBlue : DinorTheme.textGrey,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
       ),
     );
   }
