@@ -42,7 +42,7 @@ class _HomeScreenState extends State<HomeScreen> {
     const Color brandBlue = Color(0xFF229ED9);
 
     return Scaffold(
-      backgroundColor: DinorTheme.bgLight,
+      backgroundColor: DinorTheme.bgDark,
       body: SafeArea(
         child: Column(
           children: [
@@ -68,7 +68,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const Spacer(),
                   IconButton(
-                    icon: const Icon(Icons.more_vert, color: Colors.black54),
+                    icon: const Icon(Icons.more_vert, color: DinorTheme.textGrey),
                     onPressed: () {},
                   ),
                 ],
@@ -80,15 +80,15 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Container(
                 decoration: BoxDecoration(
-                  color: DinorTheme.surfaceWhite,
+                  color: DinorTheme.surfaceDark,
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: DinorTheme.softShadow,
                 ),
                 child: TextField(
                   decoration: InputDecoration(
                     hintText: 'Search messages...',
-                    hintStyle: TextStyle(color: Colors.grey[400]),
-                    prefixIcon: Icon(Icons.search, color: Colors.grey[400]),
+                    hintStyle: const TextStyle(color: DinorTheme.textGrey),
+                    prefixIcon: const Icon(Icons.search, color: DinorTheme.textGrey),
                     filled: false,
                     contentPadding: const EdgeInsets.symmetric(vertical: 14),
                     border: OutlineInputBorder(
@@ -166,7 +166,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   return Container(
                     margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                     decoration: BoxDecoration(
-                      color: DinorTheme.surfaceWhite,
+                      color: DinorTheme.surfaceDark,
                       borderRadius: BorderRadius.circular(16),
                       boxShadow: DinorTheme.softShadow,
                     ),
@@ -182,9 +182,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold),
                       ),
                     ),
-                    title: Text(chat['name']!, style: const TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: Text(chat['msg']!, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    trailing: Text(chat['time']!, style: const TextStyle(fontSize: 12, color: Colors.black45)),
+                    title: Text(chat['name']!, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
+                    subtitle: Text(chat['msg']!, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: DinorTheme.textGrey)),
+                    trailing: Text(chat['time']!, style: const TextStyle(fontSize: 12, color: DinorTheme.textGrey)),
                     onTap: () {
                       Navigator.push(
                         context,
@@ -212,7 +212,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 4),
-              color: Colors.black12,
+              color: DinorTheme.surfaceDark,
               child: Text(
                 'Native Core: $_nativeStatus',
                 textAlign: TextAlign.center,

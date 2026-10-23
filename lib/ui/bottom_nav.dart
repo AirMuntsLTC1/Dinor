@@ -18,7 +18,7 @@ class CustomBottomNav extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: DinorTheme.surfaceDark,
         borderRadius: BorderRadius.circular(30),
         boxShadow: DinorTheme.softShadow,
       ),
@@ -32,13 +32,13 @@ class CustomBottomNav extends StatelessWidget {
               if (states.contains(WidgetState.selected)) {
                 return const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: brandBlue);
               }
-              return const TextStyle(fontSize: 12, color: Colors.grey);
+              return const TextStyle(fontSize: 12, color: DinorTheme.textGrey);
             }),
             iconTheme: WidgetStateProperty.resolveWith((states) {
               if (states.contains(WidgetState.selected)) {
                 return const IconThemeData(color: brandBlue);
               }
-              return const IconThemeData(color: Colors.grey);
+              return const IconThemeData(color: DinorTheme.textGrey);
             }),
           ),
           child: NavigationBar(
@@ -72,17 +72,17 @@ class CustomBottomNav extends StatelessWidget {
                   width: 28,
                   height: 28,
                   decoration: BoxDecoration(
-                    color: Colors.grey[200],
+                    color: DinorTheme.bgDark,
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: currentIndex == 3 ? brandBlue : Colors.grey[400]!,
+                      color: currentIndex == 3 ? brandBlue : DinorTheme.textGrey,
                       width: 2,
                     ),
                   ),
                   child: Icon(
                     Icons.person,
                     size: 18,
-                    color: currentIndex == 3 ? brandBlue : Colors.grey[600],
+                    color: currentIndex == 3 ? brandBlue : DinorTheme.textGrey,
                   ),
                 ),
                 label: 'Profile',

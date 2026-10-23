@@ -263,7 +263,7 @@ class _ChatScreenState extends State<ChatScreen> {
     const Color brandBlue = Color(0xFF229ED9);
 
     return Scaffold(
-      backgroundColor: DinorTheme.bgLight,
+      backgroundColor: DinorTheme.bgDark,
       appBar: AppBar(
         backgroundColor: brandBlue,
         foregroundColor: Colors.white,
@@ -331,7 +331,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     decoration: BoxDecoration(
                       gradient: msg.isMe ? DinorTheme.primaryGradient : null,
-                      color: msg.isMe ? null : DinorTheme.surfaceWhite,
+                      color: msg.isMe ? null : DinorTheme.surfaceDark,
                       borderRadius: BorderRadius.only(
                         topLeft: const Radius.circular(20),
                         topRight: const Radius.circular(20),
@@ -371,7 +371,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                     msg.caption!,
                                     style: TextStyle(
                                       fontFamily: 'Roboto',
-                                      color: msg.isMe ? Colors.white : Colors.black87,
+                                      color: msg.isMe ? Colors.white : Colors.white,
                                       fontSize: 14,
                                     ),
                                   ),
@@ -382,7 +382,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             msg.text,
                             style: TextStyle(
                               fontFamily: 'Roboto',
-                              color: msg.isMe ? Colors.white : Colors.black87,
+                              color: msg.isMe ? Colors.white : Colors.white,
                               fontSize: 16,
                             ),
                           ),
@@ -427,14 +427,14 @@ class _ChatScreenState extends State<ChatScreen> {
           
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            color: Colors.white,
+            color: DinorTheme.surfaceDark,
             child: SafeArea(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   // Media Icon
                   IconButton(
-                    icon: const Icon(Icons.add_photo_alternate_outlined, color: Colors.grey),
+                    icon: const Icon(Icons.add_photo_alternate_outlined, color: DinorTheme.textGrey),
                     onPressed: () async {
                       final result = await showModalBottomSheet(
                         context: context,
@@ -472,7 +472,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       key: _inputKey,
                       margin: const EdgeInsets.symmetric(vertical: 6),
                       decoration: BoxDecoration(
-                        color: DinorTheme.surfaceWhite,
+                        color: DinorTheme.bgDark,
                         borderRadius: BorderRadius.circular(24),
                         boxShadow: DinorTheme.softShadow,
                       ),
@@ -481,7 +481,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         textCapitalization: TextCapitalization.sentences,
                         decoration: const InputDecoration(
                           hintText: 'Message',
-                          hintStyle: TextStyle(color: Colors.black45),
+                          hintStyle: TextStyle(color: DinorTheme.textGrey),
                           border: InputBorder.none,
                           contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                         ),
@@ -492,7 +492,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   
                   // Emoji & GIF Icon (Merged)
                   IconButton(
-                    icon: const Icon(Icons.emoji_emotions_outlined, color: Colors.grey),
+                    icon: const Icon(Icons.emoji_emotions_outlined, color: DinorTheme.textGrey),
                     onPressed: () {
                       showModalBottomSheet(
                         context: context,

@@ -2,22 +2,26 @@ import 'package:flutter/material.dart';
 
 class DinorTheme {
   static const Color brandBlue = Color(0xFF229ED9);
-  static const Color bgLight = Color(0xFFF2F5F8); // Soft grey-blue background
-  static const Color surfaceWhite = Colors.white;
   
-  // Soft floating shadow (Plastic/Glassmorphism look)
+  // Dark Theme Colors based on your screenshot
+  static const Color bgDark = Color(0xFF14181C);      // Deep dark background
+  static const Color surfaceDark = Color(0xFF1E242B); // Slightly lighter dark for cards
+  static const Color textWhite = Colors.white;
+  static const Color textGrey = Color(0xFF8B9AAF);    // Soft grey for subtitles
+  
+  // Soft glowing shadow for dark mode
   static List<BoxShadow> get softShadow => [
     BoxShadow(
-      color: brandBlue.withValues(alpha: 0.08),
-      blurRadius: 24,
+      color: Colors.black.withValues(alpha: 0.3),
+      blurRadius: 12,
       spreadRadius: 0,
-      offset: const Offset(0, 8),
+      offset: const Offset(0, 6),
     ),
     BoxShadow(
-      color: Colors.black.withValues(alpha: 0.03),
-      blurRadius: 4,
+      color: Colors.white.withValues(alpha: 0.02), // Subtle highlight for 3D effect
+      blurRadius: 2,
       spreadRadius: 0,
-      offset: const Offset(0, 2),
+      offset: const Offset(0, -1),
     ),
   ];
 

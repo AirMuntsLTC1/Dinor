@@ -114,7 +114,7 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
       builder: (context, scrollController) {
         return Container(
           decoration: const BoxDecoration(
-            color: DinorTheme.surfaceWhite,
+            color: DinorTheme.surfaceDark,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           // Padding uses MediaQuery.viewInsets.bottom so the caption bar rides the keyboard
@@ -129,7 +129,7 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
                     width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: Colors.grey[300],
+                      color: DinorTheme.textGrey.withValues(alpha: 0.3),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -143,7 +143,7 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
                     children: [
                       const Text(
                         'Gallery',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.black87),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
                       ),
                       if (_selectedMedia.isNotEmpty)
                         ElevatedButton(
@@ -202,7 +202,7 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
                                       Container(
                                         decoration: BoxDecoration(
                                           borderRadius: BorderRadius.circular(8),
-                                          color: Colors.grey[200],
+                                          color: DinorTheme.bgDark,
                                         ),
                                         clipBehavior: Clip.hardEdge,
                                         child: _thumbnailCache.containsKey(asset.id)
@@ -246,8 +246,8 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
                   curve: Curves.easeInOut,
                   height: _selectedMedia.isNotEmpty ? 60 : 0,
                   decoration: BoxDecoration(
-                    color: DinorTheme.surfaceWhite,
-                    border: Border(top: BorderSide(color: Colors.grey[200]!)),
+                    color: DinorTheme.surfaceDark,
+                    border: Border(top: BorderSide(color: DinorTheme.bgDark)),
                   ),
                   child: _selectedMedia.isNotEmpty
                       ? Row(
@@ -260,7 +260,7 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
                                 height: 40,
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(6),
-                                  color: Colors.grey[200],
+                                  color: DinorTheme.bgDark,
                                 ),
                                 clipBehavior: Clip.hardEdge,
                                 child: _thumbnailCache.containsKey(_selectedMedia.first.id)
@@ -277,10 +277,10 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
                               child: TextField(
                                 controller: _captionController,
                                 focusNode: _captionFocus,
-                                style: const TextStyle(color: Colors.black87),
+                                style: const TextStyle(color: Colors.white),
                                 decoration: const InputDecoration(
                                   hintText: 'Add a caption...',
-                                  hintStyle: TextStyle(color: Colors.black45),
+                                  hintStyle: TextStyle(color: DinorTheme.textGrey),
                                   border: InputBorder.none,
                                   contentPadding: EdgeInsets.symmetric(horizontal: 8),
                                 ),

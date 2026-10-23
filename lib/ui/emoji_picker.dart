@@ -129,7 +129,7 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
       builder: (context, scrollController) {
         return Container(
           decoration: const BoxDecoration(
-            color: DinorTheme.surfaceWhite,
+            color: DinorTheme.surfaceDark,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: Column(
@@ -141,7 +141,7 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: Colors.grey[300],
+                    color: DinorTheme.textGrey.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -164,13 +164,13 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
                 child: TextField(
                   controller: _searchController,
                   onChanged: _onSearchChanged,
-                  style: const TextStyle(color: Color(0xFF1A567D)),
+                  style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
                     hintText: _currentTab == 0 ? 'Search emojis...' : 'Search GIFs...',
                     hintStyle: const TextStyle(color: Colors.grey),
                     prefixIcon: const Icon(Icons.search, color: Colors.grey),
                     filled: true,
-                    fillColor: const Color(0xFF242F3D),
+                    fillColor: DinorTheme.bgDark,
                     contentPadding: const EdgeInsets.symmetric(vertical: 0),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(30),
@@ -207,17 +207,17 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF229ED9) : Colors.transparent,
+          color: isSelected ? const Color(0xFF229ED9) : DinorTheme.bgDark,
           borderRadius: BorderRadius.circular(20),
         ),
         child: Row(
           children: [
-            Icon(icon, color: isSelected ? Colors.white : Colors.grey, size: 20),
+            Icon(icon, color: isSelected ? Colors.white : DinorTheme.textGrey, size: 20),
             const SizedBox(width: 8),
             Text(
               title,
               style: TextStyle(
-                color: isSelected ? Colors.white : Colors.grey,
+                color: isSelected ? Colors.white : DinorTheme.textGrey,
                 fontWeight: FontWeight.bold,
               ),
             ),
