@@ -2,7 +2,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:html/parser.dart' as parser;
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'dart:convert';
+import 'package:flutter/foundation.dart';
 
 class DinorAI {
   static Future<String> getResponse(String userMessage) async {
