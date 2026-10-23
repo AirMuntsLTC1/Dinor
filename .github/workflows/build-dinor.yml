@@ -17,20 +17,64 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Cache Flutter SDK
+        uses: actions/cache@v4
+        with:
+          path: /opt/hostedtoolcache/flutter
+          key: flutter-3.24.0-stable-${{ runner.os }}
+
+      - name: Cache pub packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            pub-${{ runner.os }}-
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.0'
           channel: 'stable'
+          cache: true
 
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build APK
-        run: flutter build apk --release --target-platform android-arm64
+      - name: Build arm64 release APK
+        run: |
+          flutter build apk \
+            --release \
+            --target-platform android-arm64 \
+            --split-per-abi \
+            --obfuscate \
+            --split-debug-info=build/debug-info
 
-      - name: Upload APK
+      - name: List output sizes
+        run: ls -lh build/app/outputs/flutter-apk/
+
+      - name: Upload arm64 APK
         uses: actions/upload-artifact@v4
         with:
-          name: dinor-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: dinor-apk-arm64
+          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          if-no-files-found: error
+
+      - name: Upload debug symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: dinor-debug-info
+          path: build/debug-info
+          if-no-files-found: warn
