@@ -17,11 +17,14 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Cache Flutter SDK
-        uses: actions/cache@v4
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
         with:
-          path: /opt/hostedtoolcache/flutter
-          key: flutter-3.24.0-stable-${{ runner.os }}
+          channel: 'stable'
+          cache: true
+
+      - name: Print Flutter version
+        run: flutter --version
 
       - name: Cache pub packages
         uses: actions/cache@v4
@@ -42,13 +45,6 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-${{ runner.os }}-
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.24.0'
-          channel: 'stable'
-          cache: true
 
       - name: Install dependencies
         run: flutter pub get
