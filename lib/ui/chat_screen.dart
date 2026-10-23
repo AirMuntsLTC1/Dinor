@@ -370,6 +370,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                   child: Text(
                                     msg.caption!,
                                     style: TextStyle(
+                                      fontFamily: 'Roboto',
                                       color: msg.isMe ? Colors.white : Colors.black87,
                                       fontSize: 14,
                                     ),
@@ -380,6 +381,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         : Text(
                             msg.text,
                             style: TextStyle(
+                              fontFamily: 'Roboto',
                               color: msg.isMe ? Colors.white : Colors.black87,
                               fontSize: 16,
                             ),
