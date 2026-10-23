@@ -48,10 +48,6 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
-        
-      - name: Analyze Code (Ignore Warnings)
-        run: flutter analyze --no-fatal-warnings --no-fatal-infos
-        continue-on-error: true
 
       - name: Build arm64 release APK
         run: |

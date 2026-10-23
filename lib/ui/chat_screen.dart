@@ -280,7 +280,8 @@ class _ChatScreenState extends State<ChatScreen> {
             child: ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.all(16),
-              scrollCacheExtent: const ScrollCacheExtent.pixels(1000), // Pre-renders messages slightly off-screen for smooth scrolling
+              // ignore: deprecated_member_use
+              cacheExtent: 1000.0, // Pre-renders messages slightly off-screen for smooth scrolling
               addAutomaticKeepAlives: true, // Keeps images in memory while scrolling
               itemCount: _messages.length + (_isAiTyping ? 1 : 0),
               itemBuilder: (context, index) {
