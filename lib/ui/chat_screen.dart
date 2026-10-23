@@ -488,9 +488,20 @@ class _ChatScreenState extends State<ChatScreen> {
                                   final file = await asset.file;
                                   if (file != null) {
                                     if (widget.isAi) {
+                                      // Convert the file to Base64
+                                      final bytes = await file.readAsBytes();
+                                      final base64String = base64Encode(bytes);
+
                                       setState(() {
                                         _messages.add(Message(DateTime.now().toString(), file.path, true, isImage: true, caption: caption.isNotEmpty ? caption : null));
                                       });
+                                      _scrollToBottom();
+                                      
+                                      // Trigger AI with the image
+                                      _triggerAiResponse(
+                                        caption.isNotEmpty ? caption : "Examine this image and tell me what you see.", 
+                                        imageBase64: base64String
+                                      );
                                     } else if (_currentUserId != null) {
                                       await supabase.from('messages').insert({
                                         'sender_id': _currentUserId,
