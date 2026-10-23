@@ -24,12 +24,14 @@ class Message {
   final bool isRead;
   final String? caption;
   final MessageStatus status;
+  final String? albumId;
 
   Message(this.id, this.text, this.isMe, {
     this.isImage = false, 
     this.caption, 
     this.isRead = false, 
-    this.status = MessageStatus.sent
+    this.status = MessageStatus.sent,
+    this.albumId,
   });
 }
 
@@ -51,10 +53,10 @@ class _ChatScreenState extends State<ChatScreen> {
   final List<Message> _messages = [];
   final GlobalKey _inputKey = GlobalKey();
   bool _isAiTyping = false;
+  
   Message? _selectedMessage;
   int? _selectedMessageIndex;
   OverlayEntry? _menuOverlay;
-  
 
   final supabase = Supabase.instance.client;
   RealtimeChannel? _chatChannel;
@@ -72,12 +74,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _initSupabaseChat() async {
     _currentUserId = supabase.auth.currentUser?.id;
-    
-    // Mark messages as read IMMEDIATELY when opening
-    if (widget.conversationId != null) {
-      ChatService.markAsRead(widget.conversationId!);
-    }
-    
+    if (widget.conversationId != null) ChatService.markAsRead(widget.conversationId!);
     _fetchMessages();
 
     _chatChannel = supabase.channel('public:messages')
@@ -88,7 +85,6 @@ class _ChatScreenState extends State<ChatScreen> {
         callback: (payload) {
           final newMsg = payload.newRecord;
           if (mounted && newMsg['conversation_id'] == widget.conversationId) {
-            // Check if we already have this message in our list (prevents double-sending)
             final exists = _messages.any((m) => m.id == newMsg['id'].toString());
             if (!exists) {
               setState(() {
@@ -98,11 +94,11 @@ class _ChatScreenState extends State<ChatScreen> {
                   newMsg['sender_id'] == _currentUserId,
                   isImage: newMsg['is_image'] ?? false,
                   isRead: newMsg['is_read'] ?? false,
+                  albumId: newMsg['album_id'],
                 ));
               });
               _scrollToBottom();
             }
-            // Always mark as read when a new message arrives
             if (widget.conversationId != null && newMsg['sender_id'] != _currentUserId) {
               ChatService.markAsRead(widget.conversationId!);
             }
@@ -123,6 +119,7 @@ class _ChatScreenState extends State<ChatScreen> {
             row['sender_id'] == _currentUserId,
             isImage: row['is_image'] ?? false,
             isRead: row['is_read'] ?? false,
+            albumId: row['album_id'],
           ));
         }
       });
@@ -147,7 +144,6 @@ class _ChatScreenState extends State<ChatScreen> {
     String text = rawText;
     try {
       final core = DinorCore.load();
-      // Use C++ batch sanitize for ultra-fast string cleanup
       text = core.batchSanitize(rawText);
     } catch (e) {
       debugPrint("C++ Sanitize failed: $e");
@@ -164,16 +160,15 @@ class _ChatScreenState extends State<ChatScreen> {
 
     if (_currentUserId == null) return;
 
-    // 1. OPTIMISTIC UPDATE: Show message instantly with 'sending' status
     int cppTime = 0;
     try { cppTime = DinorCore.load().getFastTimestamp(); } catch (_) {}
     final tempId = 'temp_$cppTime';
+
     setState(() {
       _messages.add(Message(tempId, text, true, status: MessageStatus.sending));
     });
     _scrollToBottom();
 
-    // 2. Save to Database in background
     try {
       final response = await supabase.from('messages').insert({
         'sender_id': _currentUserId,
@@ -183,28 +178,16 @@ class _ChatScreenState extends State<ChatScreen> {
         'is_read': false,
       }).select('id').single();
 
-      // 3. Replace temp message with real DB message
       setState(() {
         final index = _messages.indexWhere((m) => m.id == tempId);
         if (index != -1) {
-          _messages[index] = Message(
-            response['id'].toString(),
-            text,
-            true,
-            isRead: false,
-            status: MessageStatus.sent,
-          );
+          _messages[index] = Message(response['id'].toString(), text, true, isRead: false, status: MessageStatus.sent);
         }
       });
 
-      // 4. Update conversation last message
-      int cppNow = 0;
-      try { cppNow = DinorCore.load().getFastTimestamp(); } catch (_) {}
-      final utcString = DateTime.fromMillisecondsSinceEpoch(cppNow, isUtc: true).toIso8601String();
-      
       await supabase.from('conversations').update({
         'last_message': text,
-        'last_message_time': utcString,
+        'last_message_time': DateTime.now().toUtc().toIso8601String(),
       }).eq('id', widget.conversationId!);
 
     } catch (e) {
@@ -246,8 +229,6 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     });
   }
-
-
 
   void _showMessageMenu(BuildContext context, int index, Message msg) {
     _closeMessageMenu();
@@ -344,24 +325,111 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-
   Widget _buildMessageStatus(Message msg) {
-    // Get the string from C++
-    String statusStr = "unknown";
-    try {
-      statusStr = DinorCore.load().getStatusIcon(msg.status.index);
-    } catch (e) {
-      debugPrint("C++ Status failed: $e");
-    }
-
-    if (statusStr == "sending") {
+    if (msg.status == MessageStatus.sending) {
       return const _AnimatedSendingDots();
-    } else if (statusStr == "sent") {
+    } else if (msg.status == MessageStatus.sent) {
       return const Icon(Icons.check_circle, color: Color(0xFF229ED9), size: 14);
-    } else if (statusStr == "failed") {
+    } else if (msg.status == MessageStatus.failed) {
       return const Icon(Icons.error, color: Colors.redAccent, size: 14);
     }
     return const SizedBox.shrink();
+  }
+
+  Widget _buildAlbumGrid(List<Message> images, bool isMe) {
+    int count = images.length;
+    int displayCount = count > 4 ? 3 : count;
+
+    if (displayCount == 1) {
+      return _buildSingleImage(images[0]);
+    } else if (displayCount == 2) {
+      return Row(
+        children: [
+          Expanded(child: _buildGridImage(images[0], 130, 200)),
+          Expanded(child: _buildGridImage(images[1], 130, 200)),
+        ],
+      );
+    } else if (displayCount == 3) {
+      return SizedBox(
+        height: 200,
+        child: Row(
+          children: [
+            Expanded(child: _buildGridImage(images[0], 130, 200)),
+            Expanded(
+              child: Column(
+                children: [
+                  Expanded(child: _buildGridImage(images[1], 130, 100)),
+                  Expanded(child: _buildGridImage(images[2], 130, 100)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      return SizedBox(
+        height: 200,
+        child: Column(
+          children: [
+            Expanded(
+              child: Row(
+                children: [
+                  Expanded(child: _buildGridImage(images[0], 130, 100)),
+                  Expanded(child: _buildGridImage(images[1], 130, 100)),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Row(
+                children: [
+                  Expanded(child: _buildGridImage(images[2], 130, 100)),
+                  Expanded(
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        _buildGridImage(images[3], 130, 100),
+                        if (count > 4)
+                          Container(
+                            color: Colors.black.withValues(alpha: 0.5),
+                            child: Center(
+                              child: Text('+${count - 4}', style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  Widget _buildSingleImage(Message img) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: CachedNetworkImage(
+        imageUrl: img.text,
+        fit: BoxFit.cover,
+        placeholder: (c, u) => Container(color: Colors.grey[800], height: 200),
+        errorWidget: (c, u, e) => Container(color: Colors.grey[800], height: 200, child: const Icon(Icons.broken_image)),
+      ),
+    );
+  }
+
+  Widget _buildGridImage(Message img, double width, double height) {
+    return SizedBox(
+      width: width,
+      height: height,
+      child: CachedNetworkImage(
+        imageUrl: img.text,
+        fit: BoxFit.cover,
+        placeholder: (c, u) => Container(color: Colors.grey[800]),
+        errorWidget: (c, u, e) => Container(color: Colors.grey[800], child: const Icon(Icons.broken_image, color: Colors.white)),
+      ),
+    );
   }
 
   @override
@@ -411,17 +479,37 @@ class _ChatScreenState extends State<ChatScreen> {
                             ),
                     ),
                     const SizedBox(width: 8),
+
                     if (widget.isAi)
                       AnimatedAIAvatar(size: 36, isThinking: _isAiTyping)
                     else
                       CircleAvatar(
                         radius: 18,
                         backgroundColor: brandBlue.withValues(alpha: 0.2),
-                        child: Text(widget.title[0], style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold, fontSize: 16)),
+                        child: Text(
+                          widget.title[0],
+                          style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
                       ),
                     const SizedBox(width: 10),
+
                     Expanded(
-                      child: Text(widget.title, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _selectedMessage != null ? 'Message Options' : widget.title,
+                            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (_selectedMessage == null && widget.isAi)
+                            const Text('Online', style: TextStyle(color: brandBlue, fontSize: 12))
+                          else if (_selectedMessage == null)
+                            const Text('last seen recently', style: TextStyle(color: DinorTheme.textGrey, fontSize: 12)),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -429,7 +517,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
           
-          // Messages List
+          // Chat Messages
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
@@ -449,6 +537,30 @@ class _ChatScreenState extends State<ChatScreen> {
                 }
 
                 final msg = _messages[index];
+
+                // --- TELEGRAM ALBUM GRID LOGIC ---
+                if (msg.isImage && msg.albumId != null) {
+                  final albumImages = _messages.where((m) => m.albumId == msg.albumId).toList();
+                  if (albumImages.isNotEmpty && albumImages.first.id == msg.id) {
+                    return Align(
+                      alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        width: 260,
+                        decoration: BoxDecoration(
+                          color: DinorTheme.surfaceDark,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        clipBehavior: Clip.hardEdge,
+                        child: _buildAlbumGrid(albumImages, msg.isMe),
+                      ),
+                    );
+                  } else {
+                    return const SizedBox.shrink();
+                  }
+                }
+                // --- END ALBUM LOGIC ---
+
                 Widget messageBubble = Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -486,7 +598,6 @@ class _ChatScreenState extends State<ChatScreen> {
                         : Text(
                             msg.text, 
                             style: TextStyle(
-                              // If my message: White if unread, Grey if read. If other's message: Always white.
                               color: msg.isMe 
                                   ? (msg.isRead ? Colors.grey[400] : Colors.white) 
                                   : Colors.white, 
@@ -495,7 +606,6 @@ class _ChatScreenState extends State<ChatScreen> {
                           ),
                   );
 
-                // Add the sending/sent indicator below MY messages
                 if (msg.isMe) {
                   messageBubble = Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
@@ -566,6 +676,7 @@ class _ChatScreenState extends State<ChatScreen> {
                               if (result != null) {
                                 final List<AssetEntity> selectedAssets = result['media'];
                                 final String caption = result['caption'];
+                                final albumId = 'album_${DateTime.now().millisecondsSinceEpoch}';
 
                                 for (var asset in selectedAssets) {
                                   final file = await asset.file;
@@ -574,16 +685,15 @@ class _ChatScreenState extends State<ChatScreen> {
                                       final bytes = await file.readAsBytes();
                                       final base64String = base64Encode(bytes);
                                       setState(() {
-                                        _messages.add(Message(DateTime.now().toString(), file.path, true, isImage: true, caption: caption.isNotEmpty ? caption : null));
+                                        _messages.add(Message(DateTime.now().toString(), file.path, true, isImage: true, caption: caption.isNotEmpty ? caption : null, albumId: albumId));
                                       });
                                       _scrollToBottom();
                                       _triggerAiResponse(caption.isNotEmpty ? caption : "Examine this image.", imageBase64: base64String);
                                     } else if (_currentUserId != null) {
-                                      // Optimistic Image upload
                                       int cppTime = 0;
-    try { cppTime = DinorCore.load().getFastTimestamp(); } catch (_) {}
-    final tempId = 'temp_$cppTime';
-                                      setState(() => _messages.add(Message(tempId, file.path, true, isImage: true, caption: caption.isNotEmpty ? caption : null, status: MessageStatus.sending)));
+                                      try { cppTime = DinorCore.load().getFastTimestamp(); } catch (_) {}
+                                      final tempId = 'temp_$cppTime';
+                                      setState(() => _messages.add(Message(tempId, file.path, true, isImage: true, caption: caption.isNotEmpty ? caption : null, status: MessageStatus.sending, albumId: albumId)));
                                       _scrollToBottom();
 
                                       final fileName = '${DateTime.now().millisecondsSinceEpoch}_$_currentUserId.jpg';
@@ -596,11 +706,12 @@ class _ChatScreenState extends State<ChatScreen> {
                                         'is_image': true,
                                         'conversation_id': widget.conversationId,
                                         'is_read': false,
+                                        'album_id': albumId,
                                       }).select('id').single();
 
                                       setState(() {
                                         final index = _messages.indexWhere((m) => m.id == tempId);
-                                        if (index != -1) _messages[index] = Message(response['id'].toString(), publicUrl, true, isImage: true, caption: caption.isNotEmpty ? caption : null, status: MessageStatus.sent);
+                                        if (index != -1) _messages[index] = Message(response['id'].toString(), publicUrl, true, isImage: true, caption: caption.isNotEmpty ? caption : null, status: MessageStatus.sent, albumId: albumId);
                                       });
 
                                       await supabase.from('conversations').update({
@@ -643,7 +754,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 builder: (context) => CustomEmojiPicker(
                                   onEmojiSelected: (emoji) {
                                     final newText = _textController.text + emoji;
-                                   _textController.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: newText.length));
+                                    _textController.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: newText.length));
                                   },
                                   onGifSelected: (url) async {
                                     Navigator.pop(context);
@@ -652,8 +763,8 @@ class _ChatScreenState extends State<ChatScreen> {
                                       _scrollToBottom();
                                     } else if (_currentUserId != null && widget.conversationId != null) {
                                       int cppTime = 0;
-    try { cppTime = DinorCore.load().getFastTimestamp(); } catch (_) {}
-    final tempId = 'temp_$cppTime';
+                                      try { cppTime = DinorCore.load().getFastTimestamp(); } catch (_) {}
+                                      final tempId = 'temp_$cppTime';
                                       setState(() => _messages.add(Message(tempId, url, true, isImage: true, status: MessageStatus.sending)));
                                       _scrollToBottom();
 
@@ -705,7 +816,6 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 }
 
-
 class _AnimatedSendingDots extends StatefulWidget {
   const _AnimatedSendingDots();
 
@@ -740,17 +850,13 @@ class _AnimatedSendingDotsState extends State<_AnimatedSendingDots> with SingleT
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: List.generate(3, (index) {
-            // Create a bouncing wave effect
-            double delay = index * 0.2;
-            double progress = (t - delay) % 1.0;
-            if (progress < 0) progress += 1.0;
-            
-            // Use C++ to calculate the exact scale
             double scale = 1.0;
             try {
               scale = DinorCore.load().getAnimationScale(t, index);
             } catch (e) {
-              // Fallback if C++ fails
+              double delay = index * 0.2;
+              double progress = (t - delay) % 1.0;
+              if (progress < 0) progress += 1.0;
               scale = 1.0 + (0.6 * (progress < 0.5 ? progress * 2 : (1 - progress) * 2));
             }
             
