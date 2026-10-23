@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import '../ffi/dinor_bindings.dart';
 import '../chat/ai_service.dart';
+import 'package:photo_manager/photo_manager.dart';
 import 'ai_avatar.dart';
 import 'media_picker.dart';
 import 'emoji_picker.dart';
@@ -11,8 +12,9 @@ import 'emoji_picker.dart';
 class Message {
   final String text;
   final bool isMe;
-  final bool isImage; // New flag for GIFs/Photos
-  Message(this.text, this.isMe, {this.isImage = false});
+  final bool isImage;
+  final String? caption;
+  Message(this.text, this.isMe, {this.isImage = false, this.caption});
 }
 
 class ChatScreen extends StatefulWidget {
@@ -186,21 +188,37 @@ class _ChatScreenState extends State<ChatScreen> {
                       ],
                     ),
                     child: msg.isImage
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: msg.text.startsWith('http')
-                                ? Image.network(
-                                    msg.text,
-                                    width: 200,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, color: Colors.white),
-                                  )
-                                : Image.file(
-                                    File(msg.text),
-                                    width: 200,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, color: Colors.white),
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: msg.text.startsWith('http')
+                                    ? Image.network(
+                                        msg.text,
+                                        width: 200,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, color: Colors.white),
+                                      )
+                                    : Image.file(
+                                        File(msg.text),
+                                        width: 200,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, color: Colors.white),
+                                      ),
+                              ),
+                              if (msg.caption != null && msg.caption!.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8.0),
+                                  child: Text(
+                                    msg.caption!,
+                                    style: TextStyle(
+                                      color: msg.isMe ? Colors.white : Colors.black87,
+                                      fontSize: 14,
+                                    ),
                                   ),
+                                ),
+                            ],
                           )
                         : Text(
                             msg.text,
@@ -244,23 +262,32 @@ class _ChatScreenState extends State<ChatScreen> {
                   IconButton(
                     icon: const Icon(Icons.add_photo_alternate_outlined, color: Colors.grey),
                     onPressed: () async {
-                      final selectedAsset = await showModalBottomSheet(
+                      final result = await showModalBottomSheet(
                         context: context,
                         isScrollControlled: true,
                         backgroundColor: Colors.transparent,
                         builder: (context) => const CustomMediaPicker(),
                       );
 
-                      if (selectedAsset != null) {
-                        // Get the file from the asset and add to chat
-                        final file = await selectedAsset.file;
-                        if (file != null) {
-                          setState(() {
-                            // We use the local file path to display it instantly
-                            _messages.add(Message(file.path, true, isImage: true));
-                          });
-                          _scrollToBottom();
+                      if (result != null) {
+                        final List<AssetEntity> selectedAssets = result['media'];
+                        final String caption = result['caption'];
+
+                        // Add each selected image to the chat
+                        for (var asset in selectedAssets) {
+                          final file = await asset.file;
+                          if (file != null) {
+                            setState(() {
+                              _messages.add(Message(
+                                file.path, 
+                                true, 
+                                isImage: true, 
+                                caption: caption.isNotEmpty ? caption : null
+                              ));
+                            });
+                          }
                         }
+                        _scrollToBottom();
                       }
                     },
                   ),
