@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 import '../ffi/dinor_bindings.dart';
 import '../chat/ai_service.dart';
@@ -10,7 +11,8 @@ import 'emoji_picker.dart';
 class Message {
   final String text;
   final bool isMe;
-  Message(this.text, this.isMe);
+  final bool isImage; // New flag for GIFs/Photos
+  Message(this.text, this.isMe, {this.isImage = false});
 }
 
 class ChatScreen extends StatefulWidget {
@@ -183,13 +185,30 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                       ],
                     ),
-                    child: Text(
-                      msg.text,
-                      style: TextStyle(
-                        color: msg.isMe ? Colors.white : Colors.black87,
-                        fontSize: 16,
-                      ),
-                    ),
+                    child: msg.isImage
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: msg.text.startsWith('http')
+                                ? Image.network(
+                                    msg.text,
+                                    width: 200,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, color: Colors.white),
+                                  )
+                                : Image.file(
+                                    File(msg.text),
+                                    width: 200,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, color: Colors.white),
+                                  ),
+                          )
+                        : Text(
+                            msg.text,
+                            style: TextStyle(
+                              color: msg.isMe ? Colors.white : Colors.black87,
+                              fontSize: 16,
+                            ),
+                          ),
                   );
 
                 // Wrap AI messages with the avatar
@@ -224,13 +243,25 @@ class _ChatScreenState extends State<ChatScreen> {
                   // Media Icon
                   IconButton(
                     icon: const Icon(Icons.add_photo_alternate_outlined, color: Colors.grey),
-                    onPressed: () {
-                      showModalBottomSheet(
+                    onPressed: () async {
+                      final selectedAsset = await showModalBottomSheet(
                         context: context,
                         isScrollControlled: true,
                         backgroundColor: Colors.transparent,
                         builder: (context) => const CustomMediaPicker(),
                       );
+
+                      if (selectedAsset != null) {
+                        // Get the file from the asset and add to chat
+                        final file = await selectedAsset.file;
+                        if (file != null) {
+                          setState(() {
+                            // We use the local file path to display it instantly
+                            _messages.add(Message(file.path, true, isImage: true));
+                          });
+                          _scrollToBottom();
+                        }
+                      }
                     },
                   ),
                   
@@ -257,7 +288,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
                   
-                  // Emoji Icon
+                  // Emoji & GIF Icon (Merged)
                   IconButton(
                     icon: const Icon(Icons.emoji_emotions_outlined, color: Colors.grey),
                     onPressed: () {
@@ -274,18 +305,20 @@ class _ChatScreenState extends State<ChatScreen> {
                               selection: TextSelection.collapsed(offset: newText.length),
                             );
                           },
+                          onGifSelected: (url) {
+                            // Close picker and send GIF message
+                            Navigator.pop(context);
+                            setState(() {
+                              _messages.add(Message(url, true, isImage: true));
+                            });
+                            _scrollToBottom();
+                          },
                         ),
                       );
                     },
                   ),
                   
-                  // GIF Icon
-                  IconButton(
-                    icon: const Icon(Icons.gif_box_outlined, color: Colors.grey),
-                    onPressed: () {
-                      // GIF logic later
-                    },
-                  ),
+
 
                   const SizedBox(width: 4),
 

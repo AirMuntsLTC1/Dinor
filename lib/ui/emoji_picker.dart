@@ -1,53 +1,84 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'emoji_widget.dart';
 
 class CustomEmojiPicker extends StatefulWidget {
   final Function(String) onEmojiSelected;
+  final Function(String) onGifSelected;
 
-  const CustomEmojiPicker({super.key, required this.onEmojiSelected});
+  const CustomEmojiPicker({
+    super.key,
+    required this.onEmojiSelected,
+    required this.onGifSelected,
+  });
 
   @override
   State<CustomEmojiPicker> createState() => _CustomEmojiPickerState();
 }
 
 class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
+  int _currentTab = 0; // 0 = Emoji, 1 = GIF
+
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
-  // Organized emojis
+  // --- EMOJI DATA ---
   final Map<String, List<String>> _emojiCategories = {
     'Smileys & People': [
       '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇',
       '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚',
-      '😋', '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🤩',
-      '🥳', '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣',
-      '😖', '😫', '😩', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬'
+      '😋', '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🤩'
     ],
     'Animals & Nature': [
       '🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼', '🐻‍❄️', '🐨',
-      '🐯', '🦁', '🐮', '🐷', '🐸', '🐵', '🐔', '🐧', '🐦', '🐤',
-      '🌵', '🎄', '🌲', '🌳', '🌴', '🌱', '🌿', '☘️', '🍀', '🎍'
+      '🐯', '🦁', '🐮', '🐷', '🐸', '🐵', '🐔', '🐧', '🐦', '🐤'
     ],
     'Food & Drink': [
       '🍏', '🍎', '🍐', '🍊', '🍋', '🍌', '🍉', '🍇', '🍓', '🫐',
-      '🍈', '🍒', '🍑', '🥭', '🍍', '🥥', '🥝', '🍅', '🍆', '🥑',
-      '🍕', '🍔', '🍟', '🌭', '🍿', '🧂', '🥓', '🥚', '🍳', '🧇'
-    ],
-    'Activities & Objects': [
-      '⚽', '🏀', '🏈', '⚾', '🥎', '🎾', '🏐', '🏉', '🥏', '🎱',
-      '📱', '💻', '⌨️', '🖥️', '🖨️', '🖱️', '🖲️', '🕹️', '🗜️', '💽',
-      '🚗', '🚕', '🚙', '🚌', '🚎', '🏎️', '🚓', '🚑', '🚒', '🚐'
+      '🍈', '🍒', '🍑', '🥭', '🍍', '🥥', '🥝', '🍅', '🍆', '🥑'
     ]
   };
 
+  // --- GIF DATA ---
+  final String _apiKey = "RTUwFs8WOiFqRq0K9UBkWS0OlUy3tVza";
+  List<dynamic> _gifs = [];
+  bool _isGifLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchGifs();
+  }
+
+  Future<void> _fetchGifs({String? query}) async {
+    setState(() => _isGifLoading = true);
+    final endpoint = query == null || query.isEmpty
+        ? 'https://api.giphy.com/v1/gifs/trending?api_key=$_apiKey&limit=20&rating=g'
+        : 'https://api.giphy.com/v1/gifs/search?api_key=$_apiKey&q=$query&limit=20&rating=g';
+
+    try {
+      final response = await http.get(Uri.parse(endpoint));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        setState(() => _gifs = data['data']);
+      }
+    } catch (e) {
+      debugPrint("Giphy error: $e");
+    } finally {
+      setState(() => _isGifLoading = false);
+    }
+  }
+
+  void _onSearchChanged(String val) {
+    setState(() => _searchQuery = val);
+    if (_currentTab == 1) {
+      _fetchGifs(query: _searchQuery);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Flatten the emojis for search, or keep categories if no search
-    final allEmojis = _emojiCategories.values.expand((i) => i).toList();
-    final filteredEmojis = allEmojis.where((emoji) {
-      return emoji.contains(_searchQuery); // Simple search for now
-    }).toList();
-
     return DraggableScrollableSheet(
       initialChildSize: 0.5,
       minChildSize: 0.4,
@@ -57,7 +88,7 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
       builder: (context, scrollController) {
         return Container(
           decoration: const BoxDecoration(
-            color: Color(0xFF17212B), // Telegram Dark Mode background color
+            color: Color(0xFF17212B), // Telegram Dark Mode
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: Column(
@@ -75,19 +106,30 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
                 ),
               ),
 
-              // Search Bar (Look closely at your screenshot, it has a search bar!)
+              // TOP TOGGLE BUTTONS (Emoji / GIF)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _buildTabButton('Emoji', 0, Icons.emoji_emotions),
+                  const SizedBox(width: 24),
+                  _buildTabButton('GIF', 1, Icons.gif_box),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // Search Bar
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: TextField(
                   controller: _searchController,
-                  onChanged: (val) => setState(() => _searchQuery = val),
+                  onChanged: _onSearchChanged,
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
-                    hintText: 'Search',
+                    hintText: _currentTab == 0 ? 'Search emojis...' : 'Search GIFs...',
                     hintStyle: const TextStyle(color: Colors.grey),
                     prefixIcon: const Icon(Icons.search, color: Colors.grey),
                     filled: true,
-                    fillColor: const Color(0xFF242F3D), // Darker input box
+                    fillColor: const Color(0xFF242F3D),
                     contentPadding: const EdgeInsets.symmetric(vertical: 0),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(30),
@@ -97,36 +139,11 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
                 ),
               ),
 
-              // Emoji Grid
+              // BODY (Switches between Emoji and GIF)
               Expanded(
-                child: _searchQuery.isNotEmpty
-                    ? _buildGrid(filteredEmojis, scrollController)
-                    : ListView.builder(
-                        controller: scrollController,
-                        itemCount: _emojiCategories.keys.length,
-                        itemBuilder: (context, index) {
-                          final category = _emojiCategories.keys.elementAt(index);
-                          final emojis = _emojiCategories[category]!;
-
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.only(left: 16, top: 16, bottom: 8),
-                                child: Text(
-                                  category,
-                                  style: const TextStyle(
-                                    color: Colors.grey,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                              _buildGrid(emojis, null),
-                            ],
-                          );
-                        },
-                      ),
+                child: _currentTab == 0
+                    ? _buildEmojiGrid(scrollController)
+                    : _buildGifGrid(scrollController),
               ),
             ],
           ),
@@ -135,26 +152,97 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
     );
   }
 
-  Widget _buildGrid(List<String> emojis, ScrollController? controller) {
+  Widget _buildTabButton(String title, int index, IconData icon) {
+    final isSelected = _currentTab == index;
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _currentTab = index;
+          _searchController.clear();
+          _searchQuery = '';
+          if (index == 1) _fetchGifs();
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF229ED9) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: isSelected ? Colors.white : Colors.grey, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              title,
+              style: TextStyle(
+                color: isSelected ? Colors.white : Colors.grey,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmojiGrid(ScrollController controller) {
+    final allEmojis = _emojiCategories.values.expand((i) => i).toList();
+    final filtered = allEmojis.where((e) => e.contains(_searchQuery)).toList();
+
     return GridView.builder(
       controller: controller,
-      shrinkWrap: controller == null,
-      physics: controller == null ? const NeverScrollableScrollPhysics() : null,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 8, // 8 columns like Telegram
-        crossAxisSpacing: 4,
-        mainAxisSpacing: 12,
+        crossAxisCount: 7,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
       ),
-      itemCount: emojis.length,
+      itemCount: filtered.length,
       itemBuilder: (context, index) {
         return AnimatedEmoji(
-          emoji: emojis[index],
-          size: 28, // Smaller size to fit 8 columns
-          onTap: () {
-            // This is the crucial part that sends the emoji to the text field!
-            widget.onEmojiSelected(emojis[index]);
-          },
+          emoji: filtered[index],
+          size: 30,
+          onTap: () => widget.onEmojiSelected(filtered[index]),
+        );
+      },
+    );
+  }
+
+  Widget _buildGifGrid(ScrollController controller) {
+    if (_isGifLoading) return const Center(child: CircularProgressIndicator(color: Color(0xFF229ED9)));
+    if (_gifs.isEmpty) return const Center(child: Text("No GIFs found", style: TextStyle(color: Colors.grey)));
+
+    return GridView.builder(
+      controller: controller,
+      padding: const EdgeInsets.all(8),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+      ),
+      itemCount: _gifs.length,
+      itemBuilder: (context, index) {
+        final gifUrl = _gifs[index]['images']['fixed_height']['url'];
+        final originalUrl = _gifs[index]['images']['original']['url'];
+
+        return GestureDetector(
+          onTap: () => widget.onGifSelected(originalUrl),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              color: Colors.black26,
+            ),
+            clipBehavior: Clip.hardEdge,
+            child: Image.network(
+              gifUrl,
+              fit: BoxFit.cover,
+              loadingBuilder: (context, child, progress) {
+                if (progress == null) return child;
+                return const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)));
+              },
+            ),
+          ),
         );
       },
     );
