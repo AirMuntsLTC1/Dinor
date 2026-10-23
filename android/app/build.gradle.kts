@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.dinor.dinor"
-    compileSdk = 34
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
