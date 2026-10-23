@@ -707,7 +707,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
 
 class _AnimatedSendingDots extends StatefulWidget {
-  const _AnimatedSendingDots({super.key});
+  const _AnimatedSendingDots();
 
   @override
   State<_AnimatedSendingDots> createState() => _AnimatedSendingDotsState();
