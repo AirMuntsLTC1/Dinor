@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
@@ -33,6 +34,11 @@ class _ChatScreenState extends State<ChatScreen> {
   final List<Message> _messages = [];
   final GlobalKey _inputKey = GlobalKey();
   bool _isAiTyping = false;
+  
+  // Long press menu state
+  Message? _selectedMessage;
+  int? _selectedMessageIndex;
+  OverlayEntry? _menuOverlay;
 
   @override
   void initState() {
@@ -112,6 +118,116 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  void _showMessageMenu(BuildContext context, int index, Message msg) {
+    // Don't open multiple menus at once
+    _closeMessageMenu();
+
+    final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final RenderBox bubbleBox = context.findRenderObject() as RenderBox;
+    final Offset position = bubbleBox.localToGlobal(Offset.zero, ancestor: overlay);
+
+    setState(() {
+      _selectedMessage = msg;
+      _selectedMessageIndex = index;
+    });
+
+    _menuOverlay = OverlayEntry(
+      builder: (context) {
+        return Stack(
+          children: [
+            // Invisible full-screen click catcher to dismiss the menu
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: _closeMessageMenu,
+                behavior: HitTestBehavior.translucent,
+              ),
+            ),
+            // The Actual Menu
+            Positioned(
+              top: position.dy - 50,
+              left: msg.isMe ? position.dx - 60 : position.dx,
+              child: TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0.0, end: 1.0),
+                duration: const Duration(milliseconds: 150),
+                curve: Curves.easeOutBack,
+                builder: (context, val, child) {
+                  return Transform.scale(
+                    scale: val,
+                    alignment: msg.isMe ? Alignment.bottomRight : Alignment.bottomLeft,
+                    child: child,
+                  );
+                },
+                child: Material(
+                  color: Colors.transparent,
+                  child: Container(
+                    height: 40,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.15),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        )
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Forward
+                        IconButton(
+                          icon: const Icon(Icons.arrow_forward, color: Colors.black54, size: 20),
+                          onPressed: () {
+                            _closeMessageMenu();
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Forward clicked')));
+                          },
+                        ),
+                        // Copy
+                        IconButton(
+                          icon: const Icon(Icons.copy, color: Colors.black54, size: 20),
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: msg.text));
+                            _closeMessageMenu();
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied to clipboard')));
+                          },
+                        ),
+                        // Delete
+                        IconButton(
+                          icon: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
+                          onPressed: () {
+                            setState(() {
+                              _messages.removeAt(index);
+                            });
+                            _closeMessageMenu();
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    Overlay.of(context).insert(_menuOverlay!);
+  }
+
+  void _closeMessageMenu() {
+    if (_menuOverlay != null) {
+      _menuOverlay!.remove();
+      _menuOverlay = null;
+      setState(() {
+        _selectedMessage = null;
+        _selectedMessageIndex = null;
+      });
+    }
+  }
+
   void _showFlyingMessage(String text, Offset startPos) {
     final overlay = Overlay.of(context);
     final overlayEntry = OverlayEntry(
@@ -138,13 +254,22 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: AppBar(
         backgroundColor: brandBlue,
         foregroundColor: Colors.white,
+        leading: _selectedMessage != null
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: _closeMessageMenu,
+              )
+            : null,
         title: Row(
           children: [
-            if (widget.isAi) ...[
+            if (widget.isAi && _selectedMessage == null) ...[
               AnimatedAIAvatar(size: 32, isThinking: _isAiTyping),
               const SizedBox(width: 12),
             ],
-            Text(widget.title),
+            if (_selectedMessage != null)
+              const Text('Message Options')
+            else
+              Text(widget.title),
           ],
         ),
       ),
@@ -245,7 +370,15 @@ class _ChatScreenState extends State<ChatScreen> {
 
                 return Align(
                   alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
-                  child: messageBubble,
+                  child: GestureDetector(
+                    onLongPress: () => _showMessageMenu(context, index, msg),
+                    child: AnimatedScale(
+                      scale: _selectedMessageIndex == index ? 1.1 : 1.0,
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeOutBack,
+                      child: messageBubble,
+                    ),
+                  ),
                 );
               },
             ),
