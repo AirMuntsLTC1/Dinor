@@ -279,6 +279,8 @@ class _ChatScreenState extends State<ChatScreen> {
             child: ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.all(16),
+              cacheExtent: 1000, // Pre-renders messages slightly off-screen for smooth scrolling
+              addAutomaticKeepAlives: true, // Keeps images in memory while scrolling
               itemCount: _messages.length + (_isAiTyping ? 1 : 0),
               itemBuilder: (context, index) {
                 if (index == _messages.length && _isAiTyping) {
@@ -323,12 +325,14 @@ class _ChatScreenState extends State<ChatScreen> {
                                         msg.text,
                                         width: 200,
                                         fit: BoxFit.cover,
+                                        cacheWidth: 400, // Decodes at half-res to save RAM and GPU
                                         errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, color: Colors.white),
                                       )
                                     : Image.file(
                                         File(msg.text),
                                         width: 200,
                                         fit: BoxFit.cover,
+                                        cacheWidth: 400, // Decodes at half-res to save RAM and GPU
                                         errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, color: Colors.white),
                                       ),
                               ),

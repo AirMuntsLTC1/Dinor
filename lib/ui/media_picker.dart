@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:typed_data';
+import 'dart:isolate';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:photo_manager/photo_manager.dart';
 
@@ -39,21 +40,26 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
 
     if (status.isGranted || videoStatus.isGranted) {
       setState(() => _hasPermission = true);
-      final List<AssetPathEntity> paths = await PhotoManager.getAssetPathList(
-        type: RequestType.common,
-        onlyAll: true,
-      );
-      if (paths.isNotEmpty) {
-        final assets = await paths.first.getAssetListPaged(page: 0, size: 100);
-        setState(() {
-          _media = assets;
-          _isLoading = false;
-        });
-        // Pre-load all thumbnails into memory so they don't flicker
-        _preloadThumbnails(assets);
-      } else {
-        setState(() => _isLoading = false);
-      }
+      
+      // Move heavy loading to a background Isolate to prevent UI freezes
+      final assets = await Isolate.run(() async {
+        final paths = await PhotoManager.getAssetPathList(
+          type: RequestType.common,
+          onlyAll: true,
+        );
+        if (paths.isNotEmpty) {
+          return await paths.first.getAssetListPaged(page: 0, size: 100);
+        }
+        return <AssetEntity>[];
+      });
+
+      setState(() {
+        _media = assets;
+        _isLoading = false;
+      });
+
+      // Pre-load thumbnails smoothly
+      _preloadThumbnails(assets);
     } else {
       setState(() {
         _isLoading = false;
@@ -63,13 +69,20 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
   }
 
   Future<void> _preloadThumbnails(List<AssetEntity> assets) async {
-    for (var asset in assets) {
-      final thumbData = await asset.thumbnailDataWithSize(const ThumbnailSize(200, 200));
+    // Load in smaller batches to keep the UI thread responsive
+    for (int i = 0; i < assets.length; i++) {
+      final asset = assets[i];
+      final thumbData = await asset.thumbnailDataWithSize(const ThumbnailSize(150, 150));
       if (thumbData != null) {
         _thumbnailCache[asset.id] = thumbData;
-        if (mounted) setState(() {}); // Refresh UI as they load
+      }
+      
+      // Update the UI every 5 images instead of every single image
+      if (i % 5 == 0 && mounted) {
+        setState(() {});
       }
     }
+    if (mounted) setState(() {}); // Final update
   }
 
   void _toggleSelection(AssetEntity asset) {

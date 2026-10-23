@@ -71,6 +71,7 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
   }
 
   void _onSearchChanged(String val) {
+    if (_searchQuery == val) return;
     setState(() => _searchQuery = val);
     if (_currentTab == 1) {
       _fetchGifs(query: _searchQuery);
@@ -237,10 +238,19 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
             child: Image.network(
               gifUrl,
               fit: BoxFit.cover,
-              loadingBuilder: (context, child, progress) {
-                if (progress == null) return child;
-                return const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)));
+              cacheWidth: 200, // Force decode at low res for smooth scrolling
+              frameBuilder: (context, child, frame, wasSyncLoaded) {
+                if (wasSyncLoaded) return child;
+                if (frame == null) {
+                   return const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)));
+                }
+                return AnimatedOpacity(
+                  opacity: 1,
+                  duration: const Duration(milliseconds: 300),
+                  child: child,
+                );
               },
+              errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, color: Colors.grey),
             ),
           ),
         );
