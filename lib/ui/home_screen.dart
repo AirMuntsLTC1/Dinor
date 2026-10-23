@@ -4,6 +4,7 @@ import 'chat_screen.dart';
 import 'ai_avatar.dart';
 import 'bottom_nav.dart';
 import 'dinor_theme.dart';
+import 'side_drawer.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,6 +16,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   String _nativeStatus = 'Checking core...';
   int _currentIndex = 0; // 0 = Chats, 1 = Friends, 2 = Settings, 3 = Profile
+  int _drawerPage = 0; // 0 = Messages, 1 = Home (Social Media)
 
   final List<Map<String, String>> _chats = [
     {'name': 'Alice', 'msg': 'Hey, are we still on for tomorrow?', 'time': '10:45 AM'},
@@ -43,8 +45,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       backgroundColor: DinorTheme.bgDark,
+      // Add the Side Drawer
+      drawer: SideDrawer(
+        onHomeTap: () => setState(() => _drawerPage = 1),
+        onMessagesTap: () => setState(() => _drawerPage = 0),
+      ),
       body: SafeArea(
-        child: Column(
+        child: _drawerPage == 0 
+          ? Column(
           children: [
             // 1. Top Header
             Padding(
@@ -220,7 +228,14 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ],
-        ),
+          )
+          : const Center(
+              child: Text(
+                'Home Feed (Social Media)\nComing Soon!', 
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white, fontSize: 18),
+              ),
+            ),
       ),
     );
   }
