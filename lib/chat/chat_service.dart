@@ -39,9 +39,15 @@ class ChatService {
   static Future<List<Map<String, dynamic>>> getMyConversations() async {
     final myId = supabase.auth.currentUser!.id;
     
+    // Fetch the conversation AND the latest message for the thumbnail
     final response = await supabase
         .from('conversations')
-        .select('*, user1:profiles!conversations_user1_id_fkey(*), user2:profiles!conversations_user2_id_fkey(*)')
+        .select('''
+          *,
+          user1:profiles!conversations_user1_id_fkey(*),
+          user2:profiles!conversations_user2_id_fkey(*),
+          latest_message:messages!messages_conversation_id_fkey(content, is_image)
+        ''')
         .or('user1_id.eq.$myId,user2_id.eq.$myId')
         .order('last_message_time', ascending: false);
         

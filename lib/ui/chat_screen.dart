@@ -409,16 +409,32 @@ class _ChatScreenState extends State<ChatScreen> {
                             children: [
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
-                                child: msg.text.startsWith('http')
-                                    ? CachedNetworkImage(
-                                        imageUrl: msg.text, 
-                                        width: 200, 
-                                        fit: BoxFit.cover, 
-                                        memCacheWidth: 400,
-                                        placeholder: (context, url) => const SizedBox(width: 200, height: 150, child: Center(child: CircularProgressIndicator(color: Colors.white))),
-                                        errorWidget: (context, url, error) => const Icon(Icons.broken_image, color: Colors.white),
-                                      )
-                                    : Image.file(File(msg.text), width: 200, fit: BoxFit.cover, cacheWidth: 400, errorBuilder: (c, e, s) => const Icon(Icons.broken_image, color: Colors.white)),
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    msg.text.startsWith('http')
+                                        ? CachedNetworkImage(
+                                            imageUrl: msg.text, 
+                                            width: 200, 
+                                            fit: BoxFit.cover, 
+                                            memCacheWidth: 400,
+                                            placeholder: (context, url) => const SizedBox(width: 200, height: 150, child: Center(child: CircularProgressIndicator(color: Colors.white))),
+                                            errorWidget: (context, url, error) => const Icon(Icons.broken_image, color: Colors.white),
+                                          )
+                                        : Image.file(File(msg.text), width: 200, fit: BoxFit.cover, cacheWidth: 400, errorBuilder: (c, e, s) => const Icon(Icons.broken_image, color: Colors.white)),
+                                    
+                                    // Show a pause icon if it's a video
+                                    if (msg.text.contains('.mp4') || msg.text.contains('video'))
+                                      Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(alpha: 0.5),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(Icons.pause, color: Colors.white, size: 32),
+                                      ),
+                                  ],
+                                ),
                               ),
                               if (msg.caption != null && msg.caption!.isNotEmpty)
                                 Padding(

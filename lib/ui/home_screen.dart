@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../chat/chat_service.dart';
 import 'chat_screen.dart';
@@ -182,14 +183,55 @@ class _HomeScreenState extends State<HomeScreen> {
                         leading: CircleAvatar(backgroundColor: brandBlue.withValues(alpha: 0.15), child: Text(otherName[0].toUpperCase(), style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold))),
                         title: Text(otherName, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
                         subtitle: Text(conv['last_message'] ?? 'No messages yet', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: DinorTheme.textGrey)),
-                        trailing: FutureBuilder<int>(
-                          future: ChatService.getUnreadCount(conv['id']),
-                          builder: (context, snapshot) {
-                            if (snapshot.hasData && snapshot.data! > 0) {
-                              return Container(padding: const EdgeInsets.all(6), decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle), child: Text(snapshot.data.toString(), style: const TextStyle(color: Colors.white, fontSize: 12)));
-                            }
-                            return const SizedBox.shrink();
-                          },
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // 1. Thumbnail for Images / Videos
+                            if (conv['latest_message'] != null && 
+                                conv['latest_message'].isNotEmpty &&
+                                conv['latest_message'][0]['is_image'] == true)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 8.0),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      CachedNetworkImage(
+                                        imageUrl: conv['latest_message'][0]['content'],
+                                        width: 40,
+                                        height: 40,
+                                        fit: BoxFit.cover,
+                                        placeholder: (c, u) => Container(width: 40, height: 40, color: Colors.grey[800]),
+                                        errorWidget: (c, u, e) => Container(width: 40, height: 40, color: Colors.grey[800], child: const Icon(Icons.broken_image, size: 16)),
+                                      ),
+                                      // If the URL contains "video" or is a known video format, show a pause icon
+                                      if (conv['latest_message'][0]['content'].toString().contains('.mp4') || 
+                                          conv['latest_message'][0]['content'].toString().contains('video'))
+                                        Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black.withValues(alpha: 0.5),
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(Icons.pause, color: Colors.white, size: 16),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            
+                            // 2. Unread Badge
+                            FutureBuilder<int>(
+                              future: ChatService.getUnreadCount(conv['id']),
+                              builder: (context, snapshot) {
+                                if (snapshot.hasData && snapshot.data! > 0) {
+                                  return Container(padding: const EdgeInsets.all(6), decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle), child: Text(snapshot.data.toString(), style: const TextStyle(color: Colors.white, fontSize: 12)));
+                                }
+                                return const SizedBox.shrink();
+                              },
+                            ),
+                          ],
                         ),
                         onTap: () => _openChat(otherId, otherName),
                       ),
