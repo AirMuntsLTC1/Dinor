@@ -53,7 +53,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
-                      color: brandBlue.withOpacity(0.15),
+                      color: brandBlue.withValues(alpha: 0.15),
                       shape: BoxShape.circle,
                       border: Border.all(color: brandBlue, width: 1.5),
                     ),
@@ -111,7 +111,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   final chat = _chats[index];
                   return ListTile(
                     leading: CircleAvatar(
-                      backgroundColor: brandBlue.withOpacity(0.15),
+                      backgroundColor: brandBlue.withValues(alpha: 0.15),
                       child: Text(
                         chat['name']![0],
                         style: const TextStyle(
