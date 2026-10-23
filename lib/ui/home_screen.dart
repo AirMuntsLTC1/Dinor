@@ -5,6 +5,7 @@ import 'ai_avatar.dart';
 import 'bottom_nav.dart';
 import 'dinor_theme.dart';
 import 'side_drawer.dart';
+import 'profile_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -51,7 +52,9 @@ class _HomeScreenState extends State<HomeScreen> {
         onMessagesTap: () => setState(() => _drawerPage = 0),
       ),
       body: SafeArea(
-        child: _drawerPage == 0 
+        child: _currentIndex == 3
+          ? const ProfileScreen() // Show Profile when index is 3
+          : _drawerPage == 0 
           ? Column(
           children: [
             // 1. Top Header
@@ -212,7 +215,6 @@ class _HomeScreenState extends State<HomeScreen> {
               currentIndex: _currentIndex,
               onTap: (index) {
                 setState(() => _currentIndex = index);
-                // TODO: Change the body content based on the tab
               },
             ),
 
