@@ -125,6 +125,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final RenderBox bubbleBox = context.findRenderObject() as RenderBox;
+    // Calculate the exact position of the bubble relative to the screen
     final Offset position = bubbleBox.localToGlobal(Offset.zero, ancestor: overlay);
 
     setState(() {
@@ -357,15 +358,19 @@ class _ChatScreenState extends State<ChatScreen> {
                           ),
                   );
 
-                // Add the GestureDetector directly to the message bubble
-                final interactiveBubble = GestureDetector(
-                  onLongPress: () => _showMessageMenu(context, index, msg),
-                  child: AnimatedScale(
-                    scale: _selectedMessageIndex == index ? 1.1 : 1.0,
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeOutBack,
-                    child: messageBubble,
-                  ),
+                // Wrap in Builder to get the correct context for the specific bubble
+                final interactiveBubble = Builder(
+                  builder: (bubbleContext) {
+                    return GestureDetector(
+                      onLongPress: () => _showMessageMenu(bubbleContext, index, msg),
+                      child: AnimatedScale(
+                        scale: _selectedMessageIndex == index ? 1.1 : 1.0,
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeOutBack,
+                        child: messageBubble,
+                      ),
+                    );
+                  }
                 );
 
                 // Wrap AI messages with the avatar

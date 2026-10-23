@@ -206,7 +206,11 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
                                         ),
                                         clipBehavior: Clip.hardEdge,
                                         child: _thumbnailCache.containsKey(asset.id)
-                                            ? Image.memory(_thumbnailCache[asset.id]!, fit: BoxFit.cover)
+                                            ? Image.memory(
+                                                _thumbnailCache[asset.id]!, 
+                                                fit: BoxFit.cover,
+                                                cacheWidth: 150, // Decode at thumbnail size
+                                              )
                                             : const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
                                       ),
                                       
@@ -260,7 +264,11 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
                                 ),
                                 clipBehavior: Clip.hardEdge,
                                 child: _thumbnailCache.containsKey(_selectedMedia.first.id)
-                                    ? Image.memory(_thumbnailCache[_selectedMedia.first.id]!, fit: BoxFit.cover)
+                                    ? Image.memory(
+                                        _thumbnailCache[_selectedMedia.first.id]!, 
+                                        fit: BoxFit.cover,
+                                        cacheWidth: 80,
+                                      )
                                     : const SizedBox(),
                               ),
                             ),

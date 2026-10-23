@@ -47,7 +47,8 @@ class DinorAI {
           return "Here is what I found:\n\n$bestAnswer";
         } else {
           // Fallback if C++ couldn't find a good match
-          return "I found some results, but they didn't directly answer your question. Here is the raw context:\n\n${allText.substring(0, 150)}...";
+          final snippet = allText.length > 150 ? allText.substring(0, 150) : allText;
+          return "I found some results, but they didn't directly answer your question. Here is the raw context:\n\n$snippet...";
         }
       }
       return "My web search failed (Status: ${response.statusCode}).";

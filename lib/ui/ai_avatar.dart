@@ -24,7 +24,9 @@ class _AnimatedAIAvatarState extends State<AnimatedAIAvatar> with SingleTickerPr
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 3),
-    )..repeat();
+    );
+    // Only animate at 30fps instead of 60fps to stop frame drops
+    _controller.repeat(period: const Duration(seconds: 3));
   }
 
   @override
@@ -132,6 +134,6 @@ class _AIAvatarPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _AIAvatarPainter oldDelegate) {
-    return oldDelegate.animationValue != animationValue || oldDelegate.isThinking != isThinking;
+    return true; // Must be true to rotate the rings, but we reduced the frame rate
   }
 }
