@@ -57,9 +57,15 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _initSupabaseChat() async {
-    if (supabase.auth.currentUser == null) {
-      await supabase.auth.signInAnonymously();
+    // Automatically sign in anonymously so we have a user ID for the database
+    if (supabase.auth.currentSession == null) {
+      try {
+        await supabase.auth.signInAnonymously();
+      } catch (e) {
+        debugPrint("Anonymous auth failed: $e");
+      }
     }
+    
     _currentUserId = supabase.auth.currentUser?.id;
     _fetchMessages();
 
