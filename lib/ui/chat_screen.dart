@@ -516,7 +516,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                       );
                                     } else if (_currentUserId != null) {
                                       // 1. Upload to Supabase Storage (Bucket: 'chat_media')
-                                      final fileName = '${DateTime.now().millisecondsSinceEpoch}_${_currentUserId}.jpg';
+                                      final fileName = '${DateTime.now().millisecondsSinceEpoch}_$_currentUserId.jpg';
                                       await supabase.storage.from('chat_media').upload(fileName, file);
                                       
                                       // 2. Get the public URL
