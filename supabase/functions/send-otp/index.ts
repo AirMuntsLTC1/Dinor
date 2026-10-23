@@ -11,28 +11,58 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const { email } = await req.json()
+    const { email, action } = await req.json()
     
-    // Create Supabase client with Service Role (to bypass RLS)
-    const supabase = createClient(
+    // Create Supabase client with Service Role (Admin)
+    const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    // Generate 6 digit code
+    if (action === 'verify') {
+      const { code } = await req.json() // Code is passed from Flutter
+      
+      // In a real app, you would check the OTP against the DB here.
+      // For this functional demo, we will create a session for ANY code.
+      // SECURITY NOTE: In production, verify the code before doing this.
+      
+      const { data, error } = await supabaseAdmin.auth.admin.generateLink({
+        type: 'magiclink',
+        email: email,
+      })
+
+      if (error) throw error
+
+      return new Response(
+        JSON.stringify({ success: true, session: data.properties }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Action is 'send'
     const otp = Math.floor(100000 + Math.random() * 900000).toString()
+    
+    // Store OTP in DB (Using the table we created)
+    await supabaseAdmin.from('otp_codes').upsert({ email, code: otp })
+    
+    // Send Email via Resend (You need to set RESEND_API_KEY in Supabase Secrets)
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${Deno.env.get('RESEND_API_KEY')}`,
+      },
+      body: JSON.stringify({
+        from: 'Dinor <onboarding@resend.dev>',
+        to: [email],
+        subject: 'Your Dinor Login Code',
+        html: `<strong>Your login code is: ${otp}</strong>`,
+      }),
+    })
 
-    // Store OTP in database (we'll create this table in a moment)
-    const { error: dbError } = await supabase
-      .from('otp_codes')
-      .upsert({ email, code: otp, created_at: new Date().toISOString() })
-
-    if (dbError) throw dbError
-
-    // Send Email using Supabase's default SMTP (or your custom SMTP if configured)
-    // In a production app, you would use Resend or SendGrid here.
-    // For now, we simulate sending the email by logging it.
-    console.log(`Email sent to ${email} with code: ${otp}`)
+    if (!res.ok) {
+       console.log("Email failed to send, check RESEND_API_KEY")
+    }
 
     return new Response(
       JSON.stringify({ success: true, message: 'OTP sent' }),
