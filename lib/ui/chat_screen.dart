@@ -139,11 +139,12 @@ class _ChatScreenState extends State<ChatScreen> {
       builder: (context) {
         return Stack(
           children: [
-            // Invisible full-screen click catcher to dismiss the menu
+            // Invisible full-screen click catcher (delayed slightly to prevent instant close)
             Positioned.fill(
               child: GestureDetector(
                 onTap: _closeMessageMenu,
                 behavior: HitTestBehavior.translucent,
+                child: const SizedBox.expand(),
               ),
             ),
             // The Actual Menu
@@ -218,7 +219,15 @@ class _ChatScreenState extends State<ChatScreen> {
       },
     );
 
-    Overlay.of(context).insert(_menuOverlay!);
+    // Save the overlay state before the async gap
+    final overlayState = Overlay.of(context);
+
+    // Delay insertion by 50ms so the long-press doesn't instantly trigger the dismiss tap
+    Future.delayed(const Duration(milliseconds: 50), () {
+      if (mounted && _menuOverlay != null) {
+        overlayState.insert(_menuOverlay!);
+      }
+    });
   }
 
   void _closeMessageMenu() {
@@ -258,12 +267,29 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: AppBar(
         backgroundColor: brandBlue,
         foregroundColor: Colors.white,
-        leading: _selectedMessage != null
-            ? IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: _closeMessageMenu,
-              )
-            : null,
+        leading: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 250),
+          transitionBuilder: (Widget child, Animation<double> animation) {
+            return RotationTransition(
+              turns: animation,
+              child: ScaleTransition(
+                scale: animation,
+                child: child,
+              ),
+            );
+          },
+          child: _selectedMessage != null
+              ? IconButton(
+                  key: const ValueKey('close_button'),
+                  icon: const Icon(Icons.close),
+                  onPressed: _closeMessageMenu,
+                )
+              : IconButton(
+                  key: const ValueKey('back_button'),
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: () => Navigator.pop(context),
+                ),
+        ),
         title: Row(
           children: [
             if (widget.isAi && _selectedMessage == null) ...[
