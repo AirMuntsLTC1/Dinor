@@ -357,6 +357,17 @@ class _ChatScreenState extends State<ChatScreen> {
                           ),
                   );
 
+                // Add the GestureDetector directly to the message bubble
+                final interactiveBubble = GestureDetector(
+                  onLongPress: () => _showMessageMenu(context, index, msg),
+                  child: AnimatedScale(
+                    scale: _selectedMessageIndex == index ? 1.1 : 1.0,
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOutBack,
+                    child: messageBubble,
+                  ),
+                );
+
                 // Wrap AI messages with the avatar
                 if (!msg.isMe && widget.isAi) {
                   return Row(
@@ -366,22 +377,14 @@ class _ChatScreenState extends State<ChatScreen> {
                         padding: EdgeInsets.only(top: 4, right: 8),
                         child: AnimatedAIAvatar(size: 28),
                       ),
-                      Flexible(child: messageBubble),
+                      Flexible(child: interactiveBubble),
                     ],
                   );
                 }
 
                 return Align(
                   alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
-                  child: GestureDetector(
-                    onLongPress: () => _showMessageMenu(context, index, msg),
-                    child: AnimatedScale(
-                      scale: _selectedMessageIndex == index ? 1.1 : 1.0,
-                      duration: const Duration(milliseconds: 200),
-                      curve: Curves.easeOutBack,
-                      child: messageBubble,
-                    ),
-                  ),
+                  child: interactiveBubble,
                 );
               },
             ),

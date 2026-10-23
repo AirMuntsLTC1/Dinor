@@ -144,7 +144,7 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
                 child: TextField(
                   controller: _searchController,
                   onChanged: _onSearchChanged,
-                  style: const TextStyle(color: Colors.black87),
+                  style: const TextStyle(color: Color(0xFF1A567D)),
                   decoration: InputDecoration(
                     hintText: _currentTab == 0 ? 'Search emojis...' : 'Search GIFs...',
                     hintStyle: const TextStyle(color: Colors.grey),

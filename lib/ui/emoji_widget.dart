@@ -63,24 +63,12 @@ class _AnimatedEmojiState extends State<AnimatedEmoji> with SingleTickerProvider
               ..scaleByDouble(_scaleAnimation.value, _scaleAnimation.value, _scaleAnimation.value, 1.0)
               ..rotateZ(_rotateAnimation.value),
             alignment: Alignment.center,
-            child: Container(
-              decoration: BoxDecoration(
-                // 3D-like shadow under the emoji
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 4,
-                    offset: const Offset(0, 4),
-                  )
-                ],
-              ),
-              child: Text(
-                widget.emoji,
-                style: TextStyle(
-                  fontSize: widget.size,
-                  // Crisp text rendering for emojis
-                  fontFamily: 'Noto Color Emoji', 
-                ),
+            child: Text(
+              widget.emoji,
+              style: TextStyle(
+                fontSize: widget.size,
+                // Crisp text rendering for emojis
+                fontFamily: 'Noto Color Emoji', 
               ),
             ),
           );
