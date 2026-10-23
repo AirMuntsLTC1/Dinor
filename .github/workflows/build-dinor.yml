@@ -26,6 +26,16 @@ jobs:
       - name: Print Flutter version
         run: flutter --version
 
+      - name: Setup Permanent Debug Keystore
+        run: |
+          mkdir -p ~/.android
+          echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
+          chmod 600 ~/.android/debug.keystore
+
+      - name: Get Debug SHA-1
+        run: |
+          keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android | grep SHA1
+
       - name: Cache pub packages
         uses: actions/cache@v4
         with:
@@ -45,11 +55,6 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-${{ runner.os }}-
-
-
-      - name: Get Debug SHA-1
-        run: |
-          keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android | grep SHA1
 
       - name: Install dependencies
         run: flutter pub get
