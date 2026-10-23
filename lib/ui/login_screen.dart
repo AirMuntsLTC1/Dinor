@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'home_screen.dart';
 import 'dinor_theme.dart';
 
@@ -18,6 +19,51 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _errorMessage;
 
   final supabase = Supabase.instance.client;
+
+
+  Future<void> _loginWithGoogle() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    
+    try {
+      // 1. Tell Supabase to open the Google Login
+      final success = await supabase.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: 'com.dinor.dinor://login-callback',
+        scopes: 'https://www.googleapis.com/auth/gmail.send', // We need this for sending emails
+      );
+
+      // 2. Once logged in, Supabase holds the Google tokens
+      if (success) {
+        // 3. We can grab the provider_token (Access Token) and refresh_token directly!
+        final session = supabase.auth.currentSession;
+        
+        if (session != null) {
+          final refreshToken = session.providerRefreshToken; // THIS IS THE TOKEN YOU NEED
+
+          debugPrint("REFRESH TOKEN: $refreshToken");
+          
+          // 4. Save it to your database so the Edge Function can use it
+          if (refreshToken != null) {
+            await supabase.from('google_tokens').upsert({
+              'id': 1,
+              'refresh_token': refreshToken,
+            });
+          }
+        }
+        
+        if (mounted) {
+          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
+        }
+      }
+    } catch (e) {
+      setState(() => _errorMessage = 'Google Login Failed: $e');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
 
   Future<void> _sendOtp() async {
     final email = _emailController.text.trim();
@@ -140,16 +186,17 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: _isLoading ? null : _sendOtp,
+                ElevatedButton.icon(
+                  onPressed: _isLoading ? null : _loginWithGoogle,
+                  icon: const Icon(Icons.g_mobiledata, size: 32, color: Colors.white),
+                  label: _isLoading
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Text('Login with Google', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: brandBlue,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   ),
-                  child: _isLoading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text('Continue', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                 ),
               ] else ...[
                 // OTP INPUT
