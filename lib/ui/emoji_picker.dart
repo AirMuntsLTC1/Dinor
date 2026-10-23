@@ -78,13 +78,33 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
         : 'https://api.giphy.com/v1/gifs/search?api_key=$_apiKey&q=$query&limit=20&rating=g';
 
     try {
-      final response = await http.get(Uri.parse(endpoint));
+      // Giphy requires a User-Agent header to prevent bot blocking
+      final response = await http.get(
+        Uri.parse(endpoint),
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+          'Accept': 'application/json',
+        },
+      );
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        setState(() => _gifs = data['data']);
+        final List<dynamic> fetchedGifs = data['data'] ?? [];
+        
+        setState(() {
+          _gifs = fetchedGifs;
+          _hasInternet = true;
+        });
+        
+        // If Giphy returns 0 results, it means the API key is invalid or rate-limited
+        if (fetchedGifs.isEmpty) {
+          debugPrint("Giphy API returned 0 results. Check your API key.");
+        }
+      } else {
+        debugPrint("Giphy API Error: Status ${response.statusCode} - ${response.body}");
       }
     } catch (e) {
-      debugPrint("Giphy error: $e");
+      debugPrint("Giphy network error: $e");
     } finally {
       setState(() => _isGifLoading = false);
     }
