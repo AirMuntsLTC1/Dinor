@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'dart:convert';
 import 'emoji_widget.dart';
@@ -289,22 +290,16 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
               color: Colors.black26,
             ),
             clipBehavior: Clip.hardEdge,
-            child: Image.network(
-              gifUrl,
+            child: CachedNetworkImage(
+              imageUrl: gifUrl,
               fit: BoxFit.cover,
-              cacheWidth: 200, // Force decode at low res for smooth scrolling
-              frameBuilder: (context, child, frame, wasSyncLoaded) {
-                if (wasSyncLoaded) return child;
-                if (frame == null) {
-                   return const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)));
-                }
-                return AnimatedOpacity(
-                  opacity: 1,
-                  duration: const Duration(milliseconds: 300),
-                  child: child,
-                );
-              },
-              errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, color: Colors.grey),
+              // Decodes the GIF at half the screen width to save RAM and make scrolling buttery smooth
+              memCacheWidth: (MediaQuery.of(context).size.width / 2 * MediaQuery.of(context).devicePixelRatio).round(),
+              placeholder: (context, url) => const Center(
+                child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+              ),
+              errorWidget: (context, url, error) => const Icon(Icons.broken_image, color: Colors.grey),
+              fadeInDuration: const Duration(milliseconds: 200),
             ),
           ),
         );

@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../ffi/dinor_bindings.dart';
 import '../chat/ai_service.dart';
 import '../chat/chat_service.dart';
@@ -409,7 +410,14 @@ class _ChatScreenState extends State<ChatScreen> {
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
                                 child: msg.text.startsWith('http')
-                                    ? Image.network(msg.text, width: 200, fit: BoxFit.cover, cacheWidth: 400, errorBuilder: (c, e, s) => const Icon(Icons.broken_image, color: Colors.white))
+                                    ? CachedNetworkImage(
+                                        imageUrl: msg.text, 
+                                        width: 200, 
+                                        fit: BoxFit.cover, 
+                                        memCacheWidth: 400,
+                                        placeholder: (context, url) => const SizedBox(width: 200, height: 150, child: Center(child: CircularProgressIndicator(color: Colors.white))),
+                                        errorWidget: (context, url, error) => const Icon(Icons.broken_image, color: Colors.white),
+                                      )
                                     : Image.file(File(msg.text), width: 200, fit: BoxFit.cover, cacheWidth: 400, errorBuilder: (c, e, s) => const Icon(Icons.broken_image, color: Colors.white)),
                               ),
                               if (msg.caption != null && msg.caption!.isNotEmpty)
@@ -507,11 +515,26 @@ class _ChatScreenState extends State<ChatScreen> {
                                         imageBase64: base64String
                                       );
                                     } else if (_currentUserId != null) {
+                                      // 1. Upload to Supabase Storage (Bucket: 'chat_media')
+                                      final fileName = '${DateTime.now().millisecondsSinceEpoch}_${_currentUserId}.jpg';
+                                      await supabase.storage.from('chat_media').upload(fileName, file);
+                                      
+                                      // 2. Get the public URL
+                                      final publicUrl = supabase.storage.from('chat_media').getPublicUrl(fileName);
+
+                                      // 3. Save URL to DB
                                       await supabase.from('messages').insert({
                                         'sender_id': _currentUserId,
-                                        'content': file.path,
+                                        'content': publicUrl,
                                         'is_image': true,
+                                        'conversation_id': widget.conversationId,
                                       });
+                                      
+                                      // 4. Update conversation last message
+                                      await supabase.from('conversations').update({
+                                        'last_message': '📷 Photo',
+                                        'last_message_time': DateTime.now().toUtc().toIso8601String(),
+                                      }).eq('id', widget.conversationId!);
                                     }
                                   }
                                 }
