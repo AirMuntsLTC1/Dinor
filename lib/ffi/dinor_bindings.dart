@@ -22,6 +22,18 @@ typedef _SanitizeD = int Function(Pointer<Utf8>, Pointer<Utf8>, int);
 typedef _HashC = Int32 Function(Pointer<Utf8>);
 typedef _HashD = int Function(Pointer<Utf8>);
 
+typedef _AnimationC = Float Function(Double, Int32);
+typedef _AnimationD = double Function(double, int);
+
+typedef _StatusC = Pointer<Utf8> Function(Int32);
+typedef _StatusD = Pointer<Utf8> Function(int);
+
+typedef _TimestampC = Int64 Function();
+typedef _TimestampD = int Function();
+
+typedef _BatchSanitizeC = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Int32);
+typedef _BatchSanitizeD = int Function(Pointer<Utf8>, Pointer<Utf8>, int);
+
 class DinorCore {
   final DynamicLibrary _lib;
   DinorCore._(this._lib);
@@ -89,6 +101,32 @@ class DinorCore {
     final result = fn(input);
     calloc.free(input);
     return result;
+  }
+
+  double getAnimationScale(double timeSeconds, int dotIndex) {
+    final fn = _lib.lookupFunction<_AnimationC, _AnimationD>('dinor_animation_scale');
+    return fn(timeSeconds, dotIndex);
+  }
+
+  int getFastTimestamp() {
+    final fn = _lib.lookupFunction<_TimestampC, _TimestampD>('dinor_fast_timestamp');
+    return fn();
+  }
+
+  String batchSanitize(String text) {
+    final fn = _lib.lookupFunction<_BatchSanitizeC, _BatchSanitizeD>('dinor_batch_sanitize');
+    final input = text.toNativeUtf8();
+    final out = calloc<Uint8>(text.length + 2).cast<Utf8>();
+    final n = fn(input, out, text.length + 2);
+    final result = n < 0 ? text : out.toDartString();
+    calloc.free(input);
+    calloc.free(out);
+    return result;
+  }
+
+  String getStatusIcon(int statusCode) {
+    final fn = _lib.lookupFunction<_StatusC, _StatusD>('dinor_get_status_icon');
+    return fn(statusCode).toDartString();
   }
 
   String formatMessage(String text) {

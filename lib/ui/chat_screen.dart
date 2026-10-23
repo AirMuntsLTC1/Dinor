@@ -14,6 +14,8 @@ import 'media_picker.dart';
 import 'emoji_picker.dart';
 import 'dinor_theme.dart';
 
+enum MessageStatus { sending, sent, failed }
+
 class Message {
   final String id;
   final String text;
@@ -21,9 +23,14 @@ class Message {
   final bool isImage;
   final bool isRead;
   final String? caption;
-  final bool isSending; // Optimistic state
+  final MessageStatus status;
 
-  Message(this.id, this.text, this.isMe, {this.isImage = false, this.caption, this.isRead = false, this.isSending = false});
+  Message(this.id, this.text, this.isMe, {
+    this.isImage = false, 
+    this.caption, 
+    this.isRead = false, 
+    this.status = MessageStatus.sent
+  });
 }
 
 class ChatScreen extends StatefulWidget {
@@ -140,9 +147,10 @@ class _ChatScreenState extends State<ChatScreen> {
     String text = rawText;
     try {
       final core = DinorCore.load();
-      text = core.formatMessage(core.sanitizeInput(rawText));
+      // Use C++ batch sanitize for ultra-fast string cleanup
+      text = core.batchSanitize(rawText);
     } catch (e) {
-      debugPrint("C++ Format failed: $e");
+      debugPrint("C++ Sanitize failed: $e");
     }
 
     _textController.clear();
@@ -156,10 +164,12 @@ class _ChatScreenState extends State<ChatScreen> {
 
     if (_currentUserId == null) return;
 
-    // 1. OPTIMISTIC UPDATE: Show message instantly
-    final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+    // 1. OPTIMISTIC UPDATE: Show message instantly with 'sending' status
+    int cppTime = 0;
+    try { cppTime = DinorCore.load().getFastTimestamp(); } catch (_) {}
+    final tempId = 'temp_$cppTime';
     setState(() {
-      _messages.add(Message(tempId, text, true, isSending: true));
+      _messages.add(Message(tempId, text, true, status: MessageStatus.sending));
     });
     _scrollToBottom();
 
@@ -182,14 +192,19 @@ class _ChatScreenState extends State<ChatScreen> {
             text,
             true,
             isRead: false,
+            status: MessageStatus.sent,
           );
         }
       });
 
       // 4. Update conversation last message
+      int cppNow = 0;
+      try { cppNow = DinorCore.load().getFastTimestamp(); } catch (_) {}
+      final utcString = DateTime.fromMillisecondsSinceEpoch(cppNow, isUtc: true).toIso8601String();
+      
       await supabase.from('conversations').update({
         'last_message': text,
-        'last_message_time': DateTime.now().toUtc().toIso8601String(),
+        'last_message_time': utcString,
       }).eq('id', widget.conversationId!);
 
     } catch (e) {
@@ -197,7 +212,7 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() {
         final index = _messages.indexWhere((m) => m.id == tempId);
         if (index != -1) {
-          _messages[index] = Message(tempId, "Failed to send", true, isSending: false);
+          _messages[index] = Message(tempId, "Failed to send", true, status: MessageStatus.failed);
         }
       });
     }
@@ -327,6 +342,26 @@ class _ChatScreenState extends State<ChatScreen> {
         _selectedMessageIndex = null;
       });
     }
+  }
+
+
+  Widget _buildMessageStatus(Message msg) {
+    // Get the string from C++
+    String statusStr = "unknown";
+    try {
+      statusStr = DinorCore.load().getStatusIcon(msg.status.index);
+    } catch (e) {
+      debugPrint("C++ Status failed: $e");
+    }
+
+    if (statusStr == "sending") {
+      return const _AnimatedSendingDots();
+    } else if (statusStr == "sent") {
+      return const Icon(Icons.check_circle, color: Color(0xFF229ED9), size: 14);
+    } else if (statusStr == "failed") {
+      return const Icon(Icons.error, color: Colors.redAccent, size: 14);
+    }
+    return const SizedBox.shrink();
   }
 
   @override
@@ -460,6 +495,21 @@ class _ChatScreenState extends State<ChatScreen> {
                           ),
                   );
 
+                // Add the sending/sent indicator below MY messages
+                if (msg.isMe) {
+                  messageBubble = Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      messageBubble,
+                      const SizedBox(height: 4),
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4.0),
+                        child: _buildMessageStatus(msg),
+                      ),
+                    ],
+                  );
+                }
+
                 final interactiveBubble = Builder(
                   builder: (bubbleContext) {
                     return GestureDetector(
@@ -530,8 +580,10 @@ class _ChatScreenState extends State<ChatScreen> {
                                       _triggerAiResponse(caption.isNotEmpty ? caption : "Examine this image.", imageBase64: base64String);
                                     } else if (_currentUserId != null) {
                                       // Optimistic Image upload
-                                      final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
-                                      setState(() => _messages.add(Message(tempId, file.path, true, isImage: true, caption: caption.isNotEmpty ? caption : null, isSending: true)));
+                                      int cppTime = 0;
+    try { cppTime = DinorCore.load().getFastTimestamp(); } catch (_) {}
+    final tempId = 'temp_$cppTime';
+                                      setState(() => _messages.add(Message(tempId, file.path, true, isImage: true, caption: caption.isNotEmpty ? caption : null, status: MessageStatus.sending)));
                                       _scrollToBottom();
 
                                       final fileName = '${DateTime.now().millisecondsSinceEpoch}_$_currentUserId.jpg';
@@ -548,7 +600,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
                                       setState(() {
                                         final index = _messages.indexWhere((m) => m.id == tempId);
-                                        if (index != -1) _messages[index] = Message(response['id'].toString(), publicUrl, true, isImage: true, caption: caption.isNotEmpty ? caption : null);
+                                        if (index != -1) _messages[index] = Message(response['id'].toString(), publicUrl, true, isImage: true, caption: caption.isNotEmpty ? caption : null, status: MessageStatus.sent);
                                       });
 
                                       await supabase.from('conversations').update({
@@ -599,8 +651,10 @@ class _ChatScreenState extends State<ChatScreen> {
                                       setState(() => _messages.add(Message(DateTime.now().toString(), url, true, isImage: true)));
                                       _scrollToBottom();
                                     } else if (_currentUserId != null && widget.conversationId != null) {
-                                      final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
-                                      setState(() => _messages.add(Message(tempId, url, true, isImage: true, isSending: true)));
+                                      int cppTime = 0;
+    try { cppTime = DinorCore.load().getFastTimestamp(); } catch (_) {}
+    final tempId = 'temp_$cppTime';
+                                      setState(() => _messages.add(Message(tempId, url, true, isImage: true, status: MessageStatus.sending)));
                                       _scrollToBottom();
 
                                       final response = await supabase.from('messages').insert({
@@ -613,7 +667,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
                                       setState(() {
                                         final index = _messages.indexWhere((m) => m.id == tempId);
-                                        if (index != -1) _messages[index] = Message(response['id'].toString(), url, true, isImage: true);
+                                        if (index != -1) _messages[index] = Message(response['id'].toString(), url, true, isImage: true, status: MessageStatus.sent);
                                       });
                                       
                                       await supabase.from('conversations').update({
@@ -647,6 +701,76 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+
+class _AnimatedSendingDots extends StatefulWidget {
+  const _AnimatedSendingDots({super.key});
+
+  @override
+  State<_AnimatedSendingDots> createState() => _AnimatedSendingDotsState();
+}
+
+class _AnimatedSendingDotsState extends State<_AnimatedSendingDots> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final t = _controller.value;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(3, (index) {
+            // Create a bouncing wave effect
+            double delay = index * 0.2;
+            double progress = (t - delay) % 1.0;
+            if (progress < 0) progress += 1.0;
+            
+            // Use C++ to calculate the exact scale
+            double scale = 1.0;
+            try {
+              scale = DinorCore.load().getAnimationScale(t, index);
+            } catch (e) {
+              // Fallback if C++ fails
+              scale = 1.0 + (0.6 * (progress < 0.5 ? progress * 2 : (1 - progress) * 2));
+            }
+            
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 1.5),
+              child: Transform.scale(
+                scale: scale,
+                child: Container(
+                  width: 4,
+                  height: 4,
+                  decoration: const BoxDecoration(
+                    color: DinorTheme.textGrey,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+            );
+          }),
+        );
+      },
     );
   }
 }
