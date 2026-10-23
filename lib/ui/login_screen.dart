@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:google_sign_in/google_sign_in.dart';
+
 import 'home_screen.dart';
 import 'dinor_theme.dart';
 
@@ -12,154 +13,308 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  bool _isLoading = false;
-  String? _errorMessage;
-  final supabase = Supabase.instance.client;
+  final _emailController = TextEditingController();
+  final _codeController = TextEditingController();
+  final _supabase = Supabase.instance.client;
 
-  Future<void> _signInWithGoogle() async {
+  bool _isLoading = false;
+  bool _codeSent = false;
+  String? _errorMessage;
+  String? _statusMessage;
+
+  static const Color brandBlue = Color(0xFF229ED9);
+
+  Future<void> _requestCode() async {
+    final email = _emailController.text.trim().toLowerCase();
+
+    if (email.isEmpty || !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)) {
+      setState(() {
+        _errorMessage = 'Enter a valid email address.';
+        _statusMessage = null;
+      });
+      return;
+    }
+
+    FocusScope.of(context).unfocus();
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _statusMessage = null;
     });
 
     try {
-      // 1. Initialize the Native Google Sign-In (v7+ API)
-      await GoogleSignIn.instance.initialize(
-        serverClientId: '358994083024-bn76a0pgeac7vndqan8u8l313scec8rd.apps.googleusercontent.com',
+      final response = await _supabase.functions.invoke(
+        'request-email-code',
+        body: {'email': email},
       );
 
-      // 2. Show the native account selector
-      final GoogleSignInAccount googleUser = await GoogleSignIn.instance.authenticate();
-
-      // 3. Get the authentication tokens (v7+ API)
-      final GoogleSignInAuthentication googleAuth = googleUser.authentication;
-      
-      final idToken = googleAuth.idToken;
-      // Note: accessToken is no longer provided directly in v7. 
-      // Supabase can use just the idToken for login.
-
-      if (idToken == null) {
-        throw Exception('No ID Token found. Check your Google Client ID configuration.');
-      }
-
-      // 4. Log into Supabase using the Google tokens
-      await supabase.auth.signInWithIdToken(
-        provider: OAuthProvider.google,
-        idToken: idToken,
-      );
-
-      // 5. Navigate to Home
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
+      final data = response.data;
+      if (response.status < 200 || response.status >= 300) {
+        throw Exception(
+          data is Map && data['error'] is String
+              ? data['error']
+              : 'Could not request a code. Please try again.',
         );
       }
+
+      if (!mounted) return;
+      setState(() {
+        _codeSent = true;
+        _statusMessage = data is Map && data['message'] is String
+            ? data['message']
+            : 'Check your email for a sign-in code.';
+      });
+    } on FunctionException catch (e) {
+      if (!mounted) return;
+      final details = e.details;
+      setState(() {
+        _errorMessage = details is Map && details['error'] is String
+            ? details['error'] as String
+            : 'Could not send the code. Check your connection and try again.';
+      });
     } catch (e) {
-      setState(() => _errorMessage = 'Google Login Failed: $e');
+      if (!mounted) return;
+      setState(() => _errorMessage = e.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _verifyCode() async {
+    final email = _emailController.text.trim().toLowerCase();
+    final code = _codeController.text.trim();
+
+    if (!RegExp(r'^\d{8}$').hasMatch(code)) {
+      setState(() => _errorMessage = 'Enter the eight-digit code from your email.');
+      return;
+    }
+
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+      _statusMessage = null;
+    });
+
+    try {
+      final response = await _supabase.functions.invoke(
+        'verify-email-code',
+        body: {'email': email, 'code': code},
+      );
+
+      final data = response.data;
+      if (response.status < 200 ||
+          response.status >= 300 ||
+          data is! Map ||
+          data['refresh_token'] is! String ||
+          (data['refresh_token'] as String).isEmpty) {
+        throw Exception(
+          data is Map && data['error'] is String
+              ? data['error']
+              : 'The code is invalid or expired. Request a new code.',
+        );
+      }
+
+      // Establish a persistent, real Supabase Auth session.
+      await _supabase.auth.setSession(data['refresh_token'] as String);
+
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+        (route) => false,
+      );
+    } on FunctionException catch (e) {
+      if (!mounted) return;
+      final details = e.details;
+      setState(() {
+        _errorMessage = details is Map && details['error'] is String
+            ? details['error'] as String
+            : 'Could not verify the code. Please try again.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _errorMessage = e.toString().replaceFirst('Exception: ', ''));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   @override
-  Widget build(BuildContext context) {
-    const Color brandBlue = Color(0xFF229ED9);
-    const Color googleWhite = Color(0xFFF1F1F1);
+  void dispose() {
+    _emailController.dispose();
+    _codeController.dispose();
+    super.dispose();
+  }
 
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: DinorTheme.bgDark,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // App Logo / Title
-              const Icon(Icons.chat_bubble_rounded, size: 90, color: brandBlue),
-              const SizedBox(height: 24),
-              const Text(
-                'Dinor',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Connect with friends and AI in one place.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: DinorTheme.textGrey, fontSize: 16),
-              ),
-              const SizedBox(height: 60),
-
-              // Google Login Button
-              if (_isLoading)
-                const Center(child: CircularProgressIndicator(color: brandBlue))
-              else
-                ElevatedButton(
-                  onPressed: _signInWithGoogle,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: googleWhite,
-                    foregroundColor: Colors.black87,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.chat_bubble_rounded,
+                    size: 82,
+                    color: brandBlue,
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Dinor',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 36,
+                      fontWeight: FontWeight.bold,
                     ),
-                    elevation: 0,
                   ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        width: 24,
-                        height: 24,
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.white,
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Sign in with your email',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: DinorTheme.textGrey,
+                      fontSize: 15,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  TextField(
+                    controller: _emailController,
+                    enabled: !_isLoading && !_codeSent,
+                    keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.done,
+                    autocorrect: false,
+                    autofillHints: const [AutofillHints.email],
+                    decoration: InputDecoration(
+                      labelText: 'Email address',
+                      hintText: 'you@example.com',
+                      prefixIcon: const Icon(Icons.email_outlined),
+                      filled: true,
+                      fillColor: DinorTheme.surfaceDark,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    onSubmitted: (_) {
+                      if (!_codeSent && !_isLoading) _requestCode();
+                    },
+                  ),
+                  if (_codeSent) ...[
+                    const SizedBox(height: 18),
+                    TextField(
+                      controller: _codeController,
+                      enabled: !_isLoading,
+                      keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.done,
+                      autofillHints: const [AutofillHints.oneTimeCode],
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(8),
+                      ],
+                      decoration: InputDecoration(
+                        labelText: 'Eight-digit code',
+                        hintText: '000000',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        filled: true,
+                        fillColor: DinorTheme.surfaceDark,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
                         ),
-                        child: const Center(
-                          child: Text(
-                            'G',
-                            style: TextStyle(
-                              color: Colors.blueAccent,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w900,
+                      ),
+                      onSubmitted: (_) {
+                        if (!_isLoading) _verifyCode();
+                      },
+                    ),
+                  ],
+                  if (_statusMessage != null) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      _statusMessage!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: brandBlue, fontSize: 13),
+                    ),
+                  ],
+                  if (_errorMessage != null) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      _errorMessage!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.redAccent,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 22),
+                  SizedBox(
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: _isLoading
+                          ? null
+                          : (_codeSent ? _verifyCode : _requestCode),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: brandBlue,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Text(
+                              _codeSent ? 'Verify and sign in' : 'Send sign-in code',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      const Text(
-                        'Continue with Google',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.black87,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-
-              const SizedBox(height: 16),
-
-              // Error Message
-              if (_errorMessage != null)
-                Text(
-                  _errorMessage!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.redAccent, fontSize: 13),
-                ),
-
-              const SizedBox(height: 40),
-
-              // Terms of Service text
-              const Text(
-                'By continuing, you agree to Dinor\'s Terms of Service and Privacy Policy.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: DinorTheme.textGrey, fontSize: 12),
+                  if (_codeSent) ...[
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: _isLoading
+                          ? null
+                          : () {
+                              setState(() {
+                                _codeSent = false;
+                                _codeController.clear();
+                                _errorMessage = null;
+                                _statusMessage = null;
+                              });
+                            },
+                      child: const Text(
+                        'Use another email',
+                        style: TextStyle(color: DinorTheme.textGrey),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 28),
+                  const Text(
+                    'By continuing, you agree to Dinor’s Terms of Service and Privacy Policy.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: DinorTheme.textGrey,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
