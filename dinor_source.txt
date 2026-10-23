@@ -1,0 +1,2331 @@
+
+
+============================================================
+FILE: lib/main.dart
+============================================================
+
+import 'package:flutter/material.dart';
+import 'ui/home_screen.dart';
+
+void main() => runApp(const DinorApp());
+
+class DinorApp extends StatelessWidget {
+  const DinorApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    // Dinor Light Blue Brand Color
+    const Color brandBlue = Color(0xFF229ED9);
+
+    return MaterialApp(
+      title: 'Dinor',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        useMaterial3: true,
+        splashFactory: NoSplash.splashFactory, // Removes tap highlights globally
+        highlightColor: Colors.transparent,    // Removes the long-press text highlight
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: brandBlue,
+          primary: brandBlue,
+          onPrimary: Colors.white, // White text on blue buttons/appbar
+          surface: Colors.white,   // Light background
+          onSurface: Colors.black87,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: brandBlue,
+          foregroundColor: Colors.white, // White title and icons
+          elevation: 0,
+        ),
+        floatingActionButtonTheme: const FloatingActionButtonThemeData(
+          backgroundColor: brandBlue,
+          foregroundColor: Colors.white,
+        ),
+      ),
+      home: const HomeScreen(),
+    );
+  }
+}
+
+
+============================================================
+FILE: lib/ffi/dinor_bindings.dart
+============================================================
+
+import 'dart:ffi';
+import 'package:ffi/ffi.dart';
+
+typedef _VersionC = Pointer<Utf8> Function();
+typedef _VersionD = Pointer<Utf8> Function();
+
+typedef _EncryptC = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Int32);
+typedef _EncryptD = int Function(Pointer<Utf8>, Pointer<Utf8>, int);
+
+typedef _SearchC = Int32 Function(Pointer<Utf8>, Pointer<Utf8>);
+typedef _SearchD = int Function(Pointer<Utf8>, Pointer<Utf8>);
+
+typedef _FormatC = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Int32);
+typedef _FormatD = int Function(Pointer<Utf8>, Pointer<Utf8>, int);
+
+typedef _AiExtractC = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Int32);
+typedef _AiExtractD = int Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, int);
+
+class DinorCore {
+  final DynamicLibrary _lib;
+  DinorCore._(this._lib);
+
+  factory DinorCore.load() =>
+      DinorCore._(DynamicLibrary.open('libdinor_core.so'));
+
+  String version() {
+    final fn = _lib.lookupFunction<_VersionC, _VersionD>('dinor_version');
+    return fn().toDartString();
+  }
+
+  String encrypt(String text) {
+    final fn = _lib.lookupFunction<_EncryptC, _EncryptD>('dinor_encrypt');
+    final input = text.toNativeUtf8();
+    final out = calloc<Uint8>(text.length + 1).cast<Utf8>();
+    final n = fn(input, out, text.length + 1);
+    final result = n < 0 ? '' : out.toDartString();
+    calloc.free(input);
+    calloc.free(out);
+    return result;
+  }
+
+  // New: Search using C++
+  bool search(String haystack, String needle) {
+    final fn = _lib.lookupFunction<_SearchC, _SearchD>('dinor_fast_search');
+    final h = haystack.toNativeUtf8();
+    final n = needle.toNativeUtf8();
+    final result = fn(h, n);
+    calloc.free(h);
+    calloc.free(n);
+    return result == 1;
+  }
+
+  // New: Format text using C++
+  String extractAiAnswer(String query, String webText) {
+    final fn = _lib.lookupFunction<_AiExtractC, _AiExtractD>('dinor_extract_web_answer');
+    final q = query.toNativeUtf8();
+    final w = webText.toNativeUtf8();
+    final out = calloc<Uint8>(512).cast<Utf8>(); // Max 512 bytes for answer
+    
+    final n = fn(q, w, out, 512);
+    final result = n < 0 ? '' : out.toDartString();
+    
+    calloc.free(q);
+    calloc.free(w);
+    calloc.free(out);
+    return result;
+  }
+
+  String formatMessage(String text) {
+    final fn = _lib.lookupFunction<_FormatC, _FormatD>('dinor_format_message');
+    final input = text.toNativeUtf8();
+    final out = calloc<Uint8>(text.length + 2).cast<Utf8>();
+    final n = fn(input, out, text.length + 2);
+    final result = n < 0 ? text : out.toDartString();
+    calloc.free(input);
+    calloc.free(out);
+    return result;
+  }
+}
+
+
+============================================================
+FILE: lib/ui/home_screen.dart
+============================================================
+
+import 'package:flutter/material.dart';
+import '../ffi/dinor_bindings.dart';
+import 'chat_screen.dart';
+import 'ai_avatar.dart';
+import 'bottom_nav.dart';
+import 'dinor_theme.dart';
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  String _nativeStatus = 'Checking core...';
+  int _currentIndex = 0; // 0 = Chats, 1 = Friends, 2 = Settings, 3 = Profile
+
+  final List<Map<String, String>> _chats = [
+    {'name': 'Alice', 'msg': 'Hey, are we still on for tomorrow?', 'time': '10:45 AM'},
+    {'name': 'Bob', 'msg': 'Sent the files over.', 'time': 'Yesterday'},
+    {'name': 'Project Dinor', 'msg': 'Build successful!', 'time': 'Monday'},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _checkNativeCore();
+  }
+
+  void _checkNativeCore() {
+    try {
+      final core = DinorCore.load();
+      setState(() => _nativeStatus = core.version());
+    } catch (e) {
+      setState(() => _nativeStatus = 'Core offline');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const Color brandBlue = Color(0xFF229ED9);
+
+    return Scaffold(
+      backgroundColor: DinorTheme.bgLight,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // 1. Top Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: brandBlue.withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: brandBlue, width: 1.5),
+                    ),
+                    child: const Icon(Icons.person, color: brandBlue, size: 24),
+                  ),
+                  const SizedBox(width: 12),
+                  const Text(
+                    'Dinor',
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: brandBlue),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.more_vert, color: Colors.black54),
+                    onPressed: () {},
+                  ),
+                ],
+              ),
+            ),
+
+            // 2. Search Bar
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: DinorTheme.surfaceWhite,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: DinorTheme.softShadow,
+                ),
+                child: TextField(
+                  decoration: InputDecoration(
+                    hintText: 'Search messages...',
+                    hintStyle: TextStyle(color: Colors.grey[400]),
+                    prefixIcon: Icon(Icons.search, color: Colors.grey[400]),
+                    filled: false,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            // 3. Custom AI Conversation Card
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ChatScreen(title: 'Dinor AI', isAi: true),
+                    ),
+                  );
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    gradient: DinorTheme.primaryGradient,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: brandBlue.withValues(alpha: 0.3),
+                        blurRadius: 20,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      const AnimatedAIAvatar(size: 48),
+                      const SizedBox(width: 16),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Dinor AI Assistant',
+                              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              'Ask me anything!',
+                              style: TextStyle(color: Colors.white70, fontSize: 13),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(Icons.arrow_forward_ios, color: Colors.white.withValues(alpha: 0.7), size: 16),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // 4. Chat List
+            Expanded(
+              child: ListView.separated(
+                itemCount: _chats.length,
+                separatorBuilder: (context, index) => const SizedBox(height: 4),
+                itemBuilder: (context, index) {
+                  final chat = _chats[index];
+                  return Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: DinorTheme.surfaceWhite,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: DinorTheme.softShadow,
+                    ),
+                    child: ListTile(
+                    hoverColor: Colors.transparent,
+                    splashColor: Colors.transparent,
+                    focusColor: Colors.transparent,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    leading: CircleAvatar(
+                      backgroundColor: brandBlue.withValues(alpha: 0.15),
+                      child: Text(
+                        chat['name']![0],
+                        style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    title: Text(chat['name']!, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: Text(chat['msg']!, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    trailing: Text(chat['time']!, style: const TextStyle(fontSize: 12, color: Colors.black45)),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ChatScreen(title: chat['name']!),
+                        ),
+                      );
+                    },
+                  ),
+                  );
+                },
+              ),
+            ),
+            
+            // 5. Floating Bottom Navigation Bar
+            CustomBottomNav(
+              currentIndex: _currentIndex,
+              onTap: (index) {
+                setState(() => _currentIndex = index);
+                // TODO: Change the body content based on the tab
+              },
+            ),
+
+            // 6. Native Core Status Footer
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              color: Colors.black12,
+              child: Text(
+                'Native Core: $_nativeStatus',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 10, color: Colors.black54),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+============================================================
+FILE: lib/ui/chat_screen.dart
+============================================================
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'dart:async';
+import 'dart:io';
+import 'dart:math';
+import '../ffi/dinor_bindings.dart';
+import '../chat/ai_service.dart';
+import 'package:photo_manager/photo_manager.dart';
+import 'ai_avatar.dart';
+import 'media_picker.dart';
+import 'emoji_picker.dart';
+import 'dinor_theme.dart';
+
+class Message {
+  final String text;
+  final bool isMe;
+  final bool isImage;
+  final String? caption;
+  Message(this.text, this.isMe, {this.isImage = false, this.caption});
+}
+
+class ChatScreen extends StatefulWidget {
+  final String title;
+  final bool isAi;
+
+  const ChatScreen({super.key, required this.title, this.isAi = false});
+
+  @override
+  State<ChatScreen> createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<ChatScreen> {
+  final TextEditingController _textController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  final List<Message> _messages = [];
+  final GlobalKey _inputKey = GlobalKey();
+  bool _isAiTyping = false;
+  
+  // Long press menu state
+  Message? _selectedMessage;
+  int? _selectedMessageIndex;
+  OverlayEntry? _menuOverlay;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.isAi) {
+      _messages.add(Message("Hello! I am Dinor AI. Ask me anything and I'll search the web.", false));
+    }
+  }
+
+  void _sendMessage() {
+    final rawText = _textController.text.trim();
+    if (rawText.isEmpty) return;
+
+    // 1. Format via C++ safely
+    String text = rawText;
+    try {
+      text = DinorCore.load().formatMessage(rawText);
+    } catch (e) {
+      debugPrint("C++ Format failed, using raw text: $e");
+    }
+
+    // 2. Get input position for animation
+    final RenderBox? inputBox = _inputKey.currentContext?.findRenderObject() as RenderBox?;
+    final Offset startPosition = inputBox != null
+        ? inputBox.localToGlobal(Offset.zero)
+        : const Offset(0, 0);
+
+    // 3. Clear input field
+    _textController.clear();
+
+    // 4. Trigger animation
+    _showFlyingMessage(text, startPosition);
+
+    // 5. Add message
+    setState(() {
+      _messages.add(Message(text, true));
+    });
+    _scrollToBottom();
+
+    // 6. Trigger AI
+    if (widget.isAi) {
+      _triggerAiResponse(text);
+    }
+  }
+
+  void _triggerAiResponse(String userText) async {
+    setState(() => _isAiTyping = true);
+    _scrollToBottom();
+
+    try {
+      String response = await DinorAI.getResponse(userText);
+      if (!mounted) return;
+
+      setState(() {
+        _isAiTyping = false;
+        _messages.add(Message(response, false));
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isAiTyping = false;
+        _messages.add(Message("Error connecting to AI: $e", false));
+      });
+    }
+    _scrollToBottom();
+  }
+
+  void _scrollToBottom() {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  void _showMessageMenu(BuildContext context, int index, Message msg) {
+    // Don't open multiple menus at once
+    _closeMessageMenu();
+
+    final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final RenderBox bubbleBox = context.findRenderObject() as RenderBox;
+    final Offset position = bubbleBox.localToGlobal(Offset.zero, ancestor: overlay);
+
+    setState(() {
+      _selectedMessage = msg;
+      _selectedMessageIndex = index;
+    });
+
+    _menuOverlay = OverlayEntry(
+      builder: (context) {
+        return Stack(
+          children: [
+            // Invisible full-screen click catcher to dismiss the menu
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: _closeMessageMenu,
+                behavior: HitTestBehavior.translucent,
+              ),
+            ),
+            // The Actual Menu
+            Positioned(
+              top: position.dy - 50,
+              left: msg.isMe ? position.dx - 60 : position.dx,
+              child: TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0.0, end: 1.0),
+                duration: const Duration(milliseconds: 150),
+                curve: Curves.easeOutBack,
+                builder: (context, val, child) {
+                  return Transform.scale(
+                    scale: val,
+                    alignment: msg.isMe ? Alignment.bottomRight : Alignment.bottomLeft,
+                    child: child,
+                  );
+                },
+                child: Material(
+                  color: Colors.transparent,
+                  child: Container(
+                    height: 40,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.15),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        )
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Forward
+                        IconButton(
+                          icon: const Icon(Icons.arrow_forward, color: Colors.black54, size: 20),
+                          onPressed: () {
+                            _closeMessageMenu();
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Forward clicked')));
+                          },
+                        ),
+                        // Copy
+                        IconButton(
+                          icon: const Icon(Icons.copy, color: Colors.black54, size: 20),
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: msg.text));
+                            _closeMessageMenu();
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied to clipboard')));
+                          },
+                        ),
+                        // Delete
+                        IconButton(
+                          icon: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
+                          onPressed: () {
+                            setState(() {
+                              _messages.removeAt(index);
+                            });
+                            _closeMessageMenu();
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    Overlay.of(context).insert(_menuOverlay!);
+  }
+
+  void _closeMessageMenu() {
+    if (_menuOverlay != null) {
+      _menuOverlay!.remove();
+      _menuOverlay = null;
+      setState(() {
+        _selectedMessage = null;
+        _selectedMessageIndex = null;
+      });
+    }
+  }
+
+  void _showFlyingMessage(String text, Offset startPos) {
+    final overlay = Overlay.of(context);
+    final overlayEntry = OverlayEntry(
+      builder: (context) {
+        return _FlyingMessageWidget(
+          text: text,
+          startPosition: startPos,
+          onComplete: () {},
+        );
+      },
+    );
+    overlay.insert(overlayEntry);
+    Future.delayed(const Duration(milliseconds: 400), () {
+      overlayEntry.remove();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const Color brandBlue = Color(0xFF229ED9);
+
+    return Scaffold(
+      backgroundColor: DinorTheme.bgLight,
+      appBar: AppBar(
+        backgroundColor: brandBlue,
+        foregroundColor: Colors.white,
+        leading: _selectedMessage != null
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: _closeMessageMenu,
+              )
+            : null,
+        title: Row(
+          children: [
+            if (widget.isAi && _selectedMessage == null) ...[
+              AnimatedAIAvatar(size: 32, isThinking: _isAiTyping),
+              const SizedBox(width: 12),
+            ],
+            if (_selectedMessage != null)
+              const Text('Message Options')
+            else
+              Text(widget.title),
+          ],
+        ),
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              controller: _scrollController,
+              padding: const EdgeInsets.all(16),
+              // ignore: deprecated_member_use
+              cacheExtent: 1000.0, // Pre-renders messages slightly off-screen for smooth scrolling
+              addAutomaticKeepAlives: true, // Keeps images in memory while scrolling
+              itemCount: _messages.length + (_isAiTyping ? 1 : 0),
+              itemBuilder: (context, index) {
+                if (index == _messages.length && _isAiTyping) {
+                  return const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: EdgeInsets.all(8.0),
+                      child: Text("Dinor AI is searching...", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
+                    ),
+                  );
+                }
+
+                final msg = _messages[index];
+                
+                Widget messageBubble = Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
+                      gradient: msg.isMe ? DinorTheme.primaryGradient : null,
+                      color: msg.isMe ? null : DinorTheme.surfaceWhite,
+                      borderRadius: BorderRadius.only(
+                        topLeft: const Radius.circular(20),
+                        topRight: const Radius.circular(20),
+                        bottomLeft: msg.isMe ? const Radius.circular(20) : const Radius.circular(4),
+                        bottomRight: msg.isMe ? const Radius.circular(4) : const Radius.circular(20),
+                      ),
+                      boxShadow: msg.isMe ? [
+                         BoxShadow(color: brandBlue.withValues(alpha: 0.2), blurRadius: 8, offset: const Offset(0, 4))
+                      ] : DinorTheme.softShadow,
+                    ),
+                    child: msg.isImage
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: msg.text.startsWith('http')
+                                    ? Image.network(
+                                        msg.text,
+                                        width: 200,
+                                        fit: BoxFit.cover,
+                                        cacheWidth: 400, // Decodes at half-res to save RAM and GPU
+                                        errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, color: Colors.white),
+                                      )
+                                    : Image.file(
+                                        File(msg.text),
+                                        width: 200,
+                                        fit: BoxFit.cover,
+                                        cacheWidth: 400, // Decodes at half-res to save RAM and GPU
+                                        errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, color: Colors.white),
+                                      ),
+                              ),
+                              if (msg.caption != null && msg.caption!.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8.0),
+                                  child: Text(
+                                    msg.caption!,
+                                    style: TextStyle(
+                                      color: msg.isMe ? Colors.white : Colors.black87,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          )
+                        : Text(
+                            msg.text,
+                            style: TextStyle(
+                              color: msg.isMe ? Colors.white : Colors.black87,
+                              fontSize: 16,
+                            ),
+                          ),
+                  );
+
+                // Add the GestureDetector directly to the message bubble
+                final interactiveBubble = GestureDetector(
+                  onLongPress: () => _showMessageMenu(context, index, msg),
+                  child: AnimatedScale(
+                    scale: _selectedMessageIndex == index ? 1.1 : 1.0,
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOutBack,
+                    child: messageBubble,
+                  ),
+                );
+
+                // Wrap AI messages with the avatar
+                if (!msg.isMe && widget.isAi) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4, right: 8),
+                        child: AnimatedAIAvatar(size: 28),
+                      ),
+                      Flexible(child: interactiveBubble),
+                    ],
+                  );
+                }
+
+                return Align(
+                  alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
+                  child: interactiveBubble,
+                );
+              },
+            ),
+          ),
+          
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            color: Colors.white,
+            child: SafeArea(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  // Media Icon
+                  IconButton(
+                    icon: const Icon(Icons.add_photo_alternate_outlined, color: Colors.grey),
+                    onPressed: () async {
+                      final result = await showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (context) => const CustomMediaPicker(),
+                      );
+
+                      if (result != null) {
+                        final List<AssetEntity> selectedAssets = result['media'];
+                        final String caption = result['caption'];
+
+                        // Add each selected image to the chat
+                        for (var asset in selectedAssets) {
+                          final file = await asset.file;
+                          if (file != null) {
+                            setState(() {
+                              _messages.add(Message(
+                                file.path, 
+                                true, 
+                                isImage: true, 
+                                caption: caption.isNotEmpty ? caption : null
+                              ));
+                            });
+                          }
+                        }
+                        _scrollToBottom();
+                      }
+                    },
+                  ),
+                  
+                  // Text Input
+                  Expanded(
+                    child: Container(
+                      key: _inputKey,
+                      margin: const EdgeInsets.symmetric(vertical: 6),
+                      decoration: BoxDecoration(
+                        color: DinorTheme.surfaceWhite,
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: DinorTheme.softShadow,
+                      ),
+                      child: TextField(
+                        controller: _textController,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: const InputDecoration(
+                          hintText: 'Message',
+                          hintStyle: TextStyle(color: Colors.black45),
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        ),
+                        onSubmitted: (_) => _sendMessage(),
+                      ),
+                    ),
+                  ),
+                  
+                  // Emoji & GIF Icon (Merged)
+                  IconButton(
+                    icon: const Icon(Icons.emoji_emotions_outlined, color: Colors.grey),
+                    onPressed: () {
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (context) => CustomEmojiPicker(
+                          onEmojiSelected: (emoji) {
+                            // Add the emoji to the text field
+                            final newText = _textController.text + emoji;
+                            _textController.value = TextEditingValue(
+                              text: newText,
+                              selection: TextSelection.collapsed(offset: newText.length),
+                            );
+                          },
+                          onGifSelected: (url) {
+                            // Close picker and send GIF message
+                            Navigator.pop(context);
+                            setState(() {
+                              _messages.add(Message(url, true, isImage: true));
+                            });
+                            _scrollToBottom();
+                          },
+                        ),
+                      );
+                    },
+                  ),
+                  
+
+
+                  const SizedBox(width: 4),
+
+                  // Send Button
+                  CircleAvatar(
+                    backgroundColor: brandBlue,
+                    child: IconButton(
+                      icon: const Icon(Icons.send, color: Colors.white, size: 20),
+                      onPressed: _sendMessage,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FlyingMessageWidget extends StatefulWidget {
+  final String text;
+  final Offset startPosition;
+  final VoidCallback onComplete;
+
+  const _FlyingMessageWidget({
+    required this.text,
+    required this.startPosition,
+    required this.onComplete,
+  });
+
+  @override
+  State<_FlyingMessageWidget> createState() => _FlyingMessageWidgetState();
+}
+
+class _FlyingMessageWidgetState extends State<_FlyingMessageWidget> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
+    _animation = CurvedAnimation(parent: _controller, curve: Curves.easeInOutCubic);
+    _controller.forward().then((_) => widget.onComplete());
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+    final endPosition = Offset(screenSize.width - 100, screenSize.height * 0.2);
+    final controlPoint = Offset(
+      widget.startPosition.dx + (endPosition.dx - widget.startPosition.dx) / 2 + 50,
+      widget.startPosition.dy - 150,
+    );
+
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) {
+        final t = _animation.value;
+        final x = pow(1 - t, 2) * widget.startPosition.dx + 2 * (1 - t) * t * controlPoint.dx + pow(t, 2) * endPosition.dx;
+        final y = pow(1 - t, 2) * widget.startPosition.dy + 2 * (1 - t) * t * controlPoint.dy + pow(t, 2) * endPosition.dy;
+
+        return Positioned(
+          left: x.toDouble(),
+          top: y.toDouble(),
+          child: IgnorePointer(
+            child: Opacity(
+              opacity: 1.0 - t,
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF229ED9),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    widget.text,
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+
+============================================================
+FILE: lib/ui/ai_avatar.dart
+============================================================
+
+import 'package:flutter/material.dart';
+import 'dart:math';
+
+class AnimatedAIAvatar extends StatefulWidget {
+  final double size;
+  final bool isThinking;
+
+  const AnimatedAIAvatar({
+    super.key,
+    this.size = 40,
+    this.isThinking = false,
+  });
+
+  @override
+  State<AnimatedAIAvatar> createState() => _AnimatedAIAvatarState();
+}
+
+class _AnimatedAIAvatarState extends State<AnimatedAIAvatar> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return CustomPaint(
+          size: Size(widget.size, widget.size),
+          painter: _AIAvatarPainter(
+            animationValue: _controller.value,
+            isThinking: widget.isThinking,
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _AIAvatarPainter extends CustomPainter {
+  final double animationValue;
+  final bool isThinking;
+
+  _AIAvatarPainter({required this.animationValue, required this.isThinking});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2;
+    final t = animationValue;
+
+    // 1. Draw the base 3D Orb (Gradient makes it look spherical)
+    final orbPaint = Paint()
+      ..shader = const RadialGradient(
+        colors: [
+          Color(0xFF80E5FF), // Bright highlight
+          Color(0xFF24A1DE), // Brand blue
+          Color(0xFF005A8A), // Dark shadow edge
+        ],
+        stops: [0.1, 0.6, 1.0],
+        center: Alignment(-0.3, -0.3), // Off-center highlight for 3D effect
+        radius: 0.9,
+      ).createShader(Rect.fromCircle(center: center, radius: radius));
+
+    canvas.drawCircle(center, radius, orbPaint);
+
+    // 2. Draw rotating 3D rings (Orbits)
+    final ringPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0
+      ..color = Colors.white.withValues(alpha: 0.6);
+
+    final ringPaint2 = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..color = const Color(0xFF24A1DE).withValues(alpha: 0.8);
+
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+
+    // Ring 1 (Tilted)
+    canvas.save();
+    canvas.rotate(t * 2 * pi);
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset.zero, width: radius * 1.8, height: radius * 0.6),
+      ringPaint,
+    );
+    canvas.restore();
+
+    // Ring 2 (Different angle)
+    canvas.save();
+    canvas.rotate(-t * 2 * pi + pi / 4);
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset.zero, width: radius * 1.6, height: radius * 1.2),
+      ringPaint2,
+    );
+    canvas.restore();
+
+    canvas.restore();
+
+    // 3. Draw a glowing "core" in the center
+    final corePulse = isThinking ? (sin(t * 10) * 0.2 + 0.8) : 0.5;
+    final corePaint = Paint()
+      ..color = Colors.white.withValues(alpha: corePulse)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+    
+    canvas.drawCircle(center, radius * 0.3, corePaint);
+
+    // 4. Outer glow if thinking
+    if (isThinking) {
+      final glowPaint = Paint()
+        ..color = const Color(0xFF24A1DE).withValues(alpha: 0.3 * corePulse)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 6
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+      canvas.drawCircle(center, radius + 4, glowPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _AIAvatarPainter oldDelegate) {
+    return oldDelegate.animationValue != animationValue || oldDelegate.isThinking != isThinking;
+  }
+}
+
+
+============================================================
+FILE: lib/ui/media_picker.dart
+============================================================
+
+import 'package:flutter/material.dart';
+import 'dart:typed_data';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:photo_manager/photo_manager.dart';
+import 'dinor_theme.dart';
+
+class CustomMediaPicker extends StatefulWidget {
+  const CustomMediaPicker({super.key});
+
+  @override
+  State<CustomMediaPicker> createState() => _CustomMediaPickerState();
+}
+
+class _CustomMediaPickerState extends State<CustomMediaPicker> {
+  List<AssetEntity> _media = [];
+  final List<AssetEntity> _selectedMedia = [];
+  bool _isLoading = true;
+  bool _hasPermission = false;
+  final Map<String, Uint8List> _thumbnailCache = {};
+  
+  final TextEditingController _captionController = TextEditingController();
+  final FocusNode _captionFocus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _requestPermissionAndLoad();
+  }
+
+  @override
+  void dispose() {
+    _captionController.dispose();
+    _captionFocus.dispose();
+    super.dispose();
+  }
+
+  Future<void> _requestPermissionAndLoad() async {
+    final PermissionStatus status = await Permission.photos.request();
+    final PermissionStatus videoStatus = await Permission.videos.request();
+
+    if (status.isGranted || videoStatus.isGranted) {
+      setState(() => _hasPermission = true);
+      
+      // Load directly (Isolate doesn't support photo_manager natively)
+      final paths = await PhotoManager.getAssetPathList(
+        type: RequestType.common,
+        onlyAll: true,
+      );
+      
+      if (paths.isNotEmpty) {
+        final assets = await paths.first.getAssetListPaged(page: 0, size: 100);
+        setState(() {
+          _media = assets;
+          _isLoading = false;
+        });
+        _preloadThumbnails(assets); // Re-added the caching call!
+      } else {
+        setState(() => _isLoading = false);
+      }
+
+      // Pre-load thumbnails smoothly
+    } else {
+      setState(() {
+        _isLoading = false;
+        _hasPermission = false;
+      });
+    }
+  }
+
+  Future<void> _preloadThumbnails(List<AssetEntity> assets) async {
+    // Load in smaller batches to keep the UI thread responsive
+    for (int i = 0; i < assets.length; i++) {
+      final asset = assets[i];
+      final thumbData = await asset.thumbnailDataWithSize(const ThumbnailSize(150, 150));
+      if (thumbData != null) {
+        _thumbnailCache[asset.id] = thumbData;
+      }
+      
+      // Update the UI every 5 images instead of every single image
+      if (i % 5 == 0 && mounted) {
+        setState(() {});
+      }
+    }
+    if (mounted) setState(() {}); // Final update
+  }
+
+  void _toggleSelection(AssetEntity asset) {
+    setState(() {
+      if (_selectedMedia.contains(asset)) {
+        _selectedMedia.remove(asset);
+      } else {
+        _selectedMedia.add(asset);
+      }
+    });
+  }
+
+  void _sendMedia() {
+    // Return the selected media and the caption back to ChatScreen
+    Navigator.pop(context, {
+      'media': _selectedMedia,
+      'caption': _captionController.text.trim(),
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // We use a Column aligned to the bottom so the keyboard naturally pushes everything up
+    return DraggableScrollableSheet(
+      initialChildSize: 0.5,
+      minChildSize: 0.4,
+      maxChildSize: 0.95,
+      snap: true,
+      snapSizes: const [0.5, 0.95],
+      builder: (context, scrollController) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: DinorTheme.surfaceWhite,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          // Padding uses MediaQuery.viewInsets.bottom so the caption bar rides the keyboard
+          child: Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+            child: Column(
+              children: [
+                // 1. Drag Handle
+                Center(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 12),
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                
+                // 2. Header (Title + Done Button)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Gallery',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.black87),
+                      ),
+                      if (_selectedMedia.isNotEmpty)
+                        ElevatedButton(
+                          onPressed: () {
+                            // If they have selections, focus the caption to let them type
+                            _captionFocus.requestFocus();
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF229ED9),
+                            foregroundColor: Colors.white,
+                          ),
+                          child: Text('Done (${_selectedMedia.length})'),
+                        ),
+                    ],
+                  ),
+                ),
+
+                // 3. Media Grid
+                Expanded(
+                  child: _isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : !_hasPermission
+                          ? Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.lock, size: 48, color: Colors.grey),
+                                  const SizedBox(height: 16),
+                                  const Text("Permission needed to view photos."),
+                                  TextButton(
+                                    onPressed: _requestPermissionAndLoad,
+                                    child: const Text("Grant Access"),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : GridView.builder(
+                              controller: scrollController,
+                              padding: const EdgeInsets.all(8),
+                              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 3,
+                                crossAxisSpacing: 4,
+                                mainAxisSpacing: 4,
+                              ),
+                              itemCount: _media.length,
+                              itemBuilder: (context, index) {
+                                final asset = _media[index];
+                                final isSelected = _selectedMedia.contains(asset);
+
+                                return GestureDetector(
+                                  onTap: () => _toggleSelection(asset),
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      // Image Thumbnail
+                                      Container(
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(8),
+                                          color: Colors.grey[200],
+                                        ),
+                                        clipBehavior: Clip.hardEdge,
+                                        child: _thumbnailCache.containsKey(asset.id)
+                                            ? Image.memory(_thumbnailCache[asset.id]!, fit: BoxFit.cover)
+                                            : const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+                                      ),
+                                      
+                                      // Selection Overlay
+                                      if (isSelected)
+                                        Container(
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF229ED9).withValues(alpha: 0.4),
+                                            borderRadius: BorderRadius.circular(8),
+                                            border: Border.all(color: const Color(0xFF229ED9), width: 3),
+                                          ),
+                                          child: Center(
+                                            child: CircleAvatar(
+                                              radius: 12,
+                                              backgroundColor: const Color(0xFF229ED9),
+                                              child: Text(
+                                                _selectedMedia.indexOf(asset).toString(),
+                                                style: const TextStyle(color: Colors.white, fontSize: 12),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                ),
+
+                // 4. Caption Composer (Only shows when media is selected)
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeInOut,
+                  height: _selectedMedia.isNotEmpty ? 60 : 0,
+                  decoration: BoxDecoration(
+                    color: DinorTheme.surfaceWhite,
+                    border: Border(top: BorderSide(color: Colors.grey[200]!)),
+                  ),
+                  child: _selectedMedia.isNotEmpty
+                      ? Row(
+                          children: [
+                            // Preview of the first selected photo
+                            Padding(
+                              padding: const EdgeInsets.all(8.0),
+                              child: Container(
+                                width: 40,
+                                height: 40,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(6),
+                                  color: Colors.grey[200],
+                                ),
+                                clipBehavior: Clip.hardEdge,
+                                child: _thumbnailCache.containsKey(_selectedMedia.first.id)
+                                    ? Image.memory(_thumbnailCache[_selectedMedia.first.id]!, fit: BoxFit.cover)
+                                    : const SizedBox(),
+                              ),
+                            ),
+                            // Caption Input
+                            Expanded(
+                              child: TextField(
+                                controller: _captionController,
+                                focusNode: _captionFocus,
+                                style: const TextStyle(color: Colors.black87),
+                                decoration: const InputDecoration(
+                                  hintText: 'Add a caption...',
+                                  hintStyle: TextStyle(color: Colors.black45),
+                                  border: InputBorder.none,
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 8),
+                                ),
+                              ),
+                            ),
+                            // Send Button
+                            IconButton(
+                              icon: const Icon(Icons.send, color: Color(0xFF229ED9)),
+                              onPressed: _sendMedia,
+                            ),
+                          ],
+                        )
+                      : null,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+}
+
+
+============================================================
+FILE: lib/ui/emoji_widget.dart
+============================================================
+
+import 'package:flutter/material.dart';
+
+class AnimatedEmoji extends StatefulWidget {
+  final String emoji;
+  final double size;
+  final VoidCallback? onTap; // New callback
+
+  const AnimatedEmoji({super.key, required this.emoji, this.size = 40, this.onTap});
+
+  @override
+  State<AnimatedEmoji> createState() => _AnimatedEmojiState();
+}
+
+class _AnimatedEmojiState extends State<AnimatedEmoji> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _scaleAnimation;
+  late Animation<double> _rotateAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+
+    // Springy scale animation
+    _scaleAnimation = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 1.0, end: 1.5).chain(CurveTween(curve: Curves.easeOutBack)), weight: 50),
+      TweenSequenceItem(tween: Tween(begin: 1.5, end: 1.0).chain(CurveTween(curve: Curves.easeInOut)), weight: 50),
+    ]).animate(_controller);
+
+    // Subtle 3D rotation
+    _rotateAnimation = Tween<double>(begin: 0, end: 0.1).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+
+  void playAnimation() {
+    _controller.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        playAnimation();
+        if (widget.onTap != null) {
+          widget.onTap!();
+        }
+      },
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          return Transform(
+            transform: Matrix4.identity()
+              ..scaleByDouble(_scaleAnimation.value, _scaleAnimation.value, _scaleAnimation.value, 1.0)
+              ..rotateZ(_rotateAnimation.value),
+            alignment: Alignment.center,
+            child: Text(
+              widget.emoji,
+              style: TextStyle(
+                fontSize: widget.size,
+                // Crisp text rendering for emojis
+                fontFamily: 'Noto Color Emoji', 
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+
+============================================================
+FILE: lib/ui/emoji_picker.dart
+============================================================
+
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'dart:convert';
+import 'emoji_widget.dart';
+import 'dinor_theme.dart';
+
+class CustomEmojiPicker extends StatefulWidget {
+  final Function(String) onEmojiSelected;
+  final Function(String) onGifSelected;
+
+  const CustomEmojiPicker({
+    super.key,
+    required this.onEmojiSelected,
+    required this.onGifSelected,
+  });
+
+  @override
+  State<CustomEmojiPicker> createState() => _CustomEmojiPickerState();
+}
+
+class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
+  int _currentTab = 0; // 0 = Emoji, 1 = GIF
+
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  // --- EMOJI DATA ---
+  final Map<String, List<String>> _emojiCategories = {
+    'Smileys & People': [
+      '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇',
+      '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚',
+      '😋', '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🤩'
+    ],
+    'Animals & Nature': [
+      '🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼', '🐻‍❄️', '🐨',
+      '🐯', '🦁', '🐮', '🐷', '🐸', '🐵', '🐔', '🐧', '🐦', '🐤'
+    ],
+    'Food & Drink': [
+      '🍏', '🍎', '🍐', '🍊', '🍋', '🍌', '🍉', '🍇', '🍓', '🫐',
+      '🍈', '🍒', '🍑', '🥭', '🍍', '🥥', '🥝', '🍅', '🍆', '🥑'
+    ]
+  };
+
+  // --- GIF DATA ---
+  final String _apiKey = "RTUwFs8WOiFqRq0K9UBkWS0OlUy3tVza";
+  List<dynamic> _gifs = [];
+  bool _isGifLoading = false;
+  bool _hasInternet = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchGifs();
+  }
+
+  Future<void> _fetchGifs({String? query}) async {
+    // Check internet first
+    final connectivityResult = await Connectivity().checkConnectivity();
+    final isOffline = connectivityResult.contains(ConnectivityResult.none);
+
+    if (isOffline) {
+      setState(() {
+        _hasInternet = false;
+        _isGifLoading = false;
+        _gifs = [];
+      });
+      return;
+    } else {
+      setState(() {
+        _hasInternet = true;
+        _isGifLoading = true;
+      });
+    }
+
+    final endpoint = query == null || query.isEmpty
+        ? 'https://api.giphy.com/v1/gifs/trending?api_key=$_apiKey&limit=20&rating=g'
+        : 'https://api.giphy.com/v1/gifs/search?api_key=$_apiKey&q=$query&limit=20&rating=g';
+
+    try {
+      final response = await http.get(Uri.parse(endpoint));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        setState(() => _gifs = data['data']);
+      }
+    } catch (e) {
+      debugPrint("Giphy error: $e");
+    } finally {
+      setState(() => _isGifLoading = false);
+    }
+  }
+
+  void _onSearchChanged(String val) {
+    if (_searchQuery == val) return;
+    setState(() => _searchQuery = val);
+    if (_currentTab == 1) {
+      _fetchGifs(query: _searchQuery);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.5,
+      minChildSize: 0.4,
+      maxChildSize: 0.95,
+      snap: true,
+      snapSizes: const [0.5, 0.95],
+      builder: (context, scrollController) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: DinorTheme.surfaceWhite,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              // Drag Handle
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.symmetric(vertical: 12),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+
+              // TOP TOGGLE BUTTONS (Emoji / GIF)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _buildTabButton('Emoji', 0, Icons.emoji_emotions),
+                  const SizedBox(width: 24),
+                  _buildTabButton('GIF', 1, Icons.gif_box),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // Search Bar
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: _onSearchChanged,
+                  style: const TextStyle(color: Color(0xFF1A567D)),
+                  decoration: InputDecoration(
+                    hintText: _currentTab == 0 ? 'Search emojis...' : 'Search GIFs...',
+                    hintStyle: const TextStyle(color: Colors.grey),
+                    prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                    filled: true,
+                    fillColor: const Color(0xFF242F3D),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(30),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ),
+
+              // BODY (Switches between Emoji and GIF)
+              Expanded(
+                child: _currentTab == 0
+                    ? _buildEmojiGrid(scrollController)
+                    : _buildGifGrid(scrollController),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTabButton(String title, int index, IconData icon) {
+    final isSelected = _currentTab == index;
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _currentTab = index;
+          _searchController.clear();
+          _searchQuery = '';
+          if (index == 1) _fetchGifs();
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF229ED9) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: isSelected ? Colors.white : Colors.grey, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              title,
+              style: TextStyle(
+                color: isSelected ? Colors.white : Colors.grey,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmojiGrid(ScrollController controller) {
+    final allEmojis = _emojiCategories.values.expand((i) => i).toList();
+    final filtered = allEmojis.where((e) => e.contains(_searchQuery)).toList();
+
+    return GridView.builder(
+      controller: controller,
+      padding: const EdgeInsets.all(16),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 7,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+      ),
+      itemCount: filtered.length,
+      itemBuilder: (context, index) {
+        return AnimatedEmoji(
+          emoji: filtered[index],
+          size: 30,
+          onTap: () => widget.onEmojiSelected(filtered[index]),
+        );
+      },
+    );
+  }
+
+  Widget _buildGifGrid(ScrollController controller) {
+    if (!_hasInternet) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.wifi_off, size: 48, color: Colors.grey),
+            SizedBox(height: 16),
+            Text("No Internet Connection", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+            SizedBox(height: 8),
+            Text("Please connect to the internet to view GIFs.", style: TextStyle(color: Colors.grey, fontSize: 12)),
+          ],
+        ),
+      );
+    }
+    if (_isGifLoading) return const Center(child: CircularProgressIndicator(color: Color(0xFF229ED9)));
+    if (_gifs.isEmpty) return const Center(child: Text("No GIFs found", style: TextStyle(color: Colors.grey)));
+
+    return GridView.builder(
+      controller: controller,
+      padding: const EdgeInsets.all(8),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+      ),
+      itemCount: _gifs.length,
+      itemBuilder: (context, index) {
+        final gifUrl = _gifs[index]['images']['fixed_height']['url'];
+        final originalUrl = _gifs[index]['images']['original']['url'];
+
+        return GestureDetector(
+          onTap: () => widget.onGifSelected(originalUrl),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              color: Colors.black26,
+            ),
+            clipBehavior: Clip.hardEdge,
+            child: Image.network(
+              gifUrl,
+              fit: BoxFit.cover,
+              cacheWidth: 200, // Force decode at low res for smooth scrolling
+              frameBuilder: (context, child, frame, wasSyncLoaded) {
+                if (wasSyncLoaded) return child;
+                if (frame == null) {
+                   return const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)));
+                }
+                return AnimatedOpacity(
+                  opacity: 1,
+                  duration: const Duration(milliseconds: 300),
+                  child: child,
+                );
+              },
+              errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, color: Colors.grey),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+
+============================================================
+FILE: lib/ui/bottom_nav.dart
+============================================================
+
+import 'package:flutter/material.dart';
+import 'dinor_theme.dart';
+
+class CustomBottomNav extends StatelessWidget {
+  final int currentIndex;
+  final Function(int) onTap;
+
+  const CustomBottomNav({
+    super.key,
+    required this.currentIndex,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const Color brandBlue = Color(0xFF229ED9);
+
+    return Container(
+      margin: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: DinorTheme.softShadow,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(30),
+        child: NavigationBarTheme(
+          data: NavigationBarThemeData(
+            backgroundColor: Colors.white,
+            indicatorColor: brandBlue.withValues(alpha: 0.15),
+            labelTextStyle: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.selected)) {
+                return const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: brandBlue);
+              }
+              return const TextStyle(fontSize: 12, color: Colors.grey);
+            }),
+            iconTheme: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.selected)) {
+                return const IconThemeData(color: brandBlue);
+              }
+              return const IconThemeData(color: Colors.grey);
+            }),
+          ),
+          child: NavigationBar(
+            height: 65,
+            elevation: 0,
+            selectedIndex: currentIndex,
+            onDestinationSelected: onTap,
+            labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+            destinations: [
+              // 1. Chats
+              const NavigationDestination(
+                icon: Icon(Icons.chat_bubble_outline),
+                selectedIcon: Icon(Icons.chat_bubble),
+                label: 'Chats',
+              ),
+              // 2. Friends
+              const NavigationDestination(
+                icon: Icon(Icons.people_outline),
+                selectedIcon: Icon(Icons.people),
+                label: 'Friends',
+              ),
+              // 3. Settings
+              const NavigationDestination(
+                icon: Icon(Icons.settings_outlined),
+                selectedIcon: Icon(Icons.settings),
+                label: 'Settings',
+              ),
+              // 4. Profile Picture Placeholder
+              NavigationDestination(
+                icon: Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: currentIndex == 3 ? brandBlue : Colors.grey[400]!,
+                      width: 2,
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.person,
+                    size: 18,
+                    color: currentIndex == 3 ? brandBlue : Colors.grey[600],
+                  ),
+                ),
+                label: 'Profile',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+============================================================
+FILE: lib/ui/dinor_theme.dart
+============================================================
+
+import 'package:flutter/material.dart';
+
+class DinorTheme {
+  static const Color brandBlue = Color(0xFF229ED9);
+  static const Color bgLight = Color(0xFFF2F5F8); // Soft grey-blue background
+  static const Color surfaceWhite = Colors.white;
+  
+  // Soft floating shadow (Plastic/Glassmorphism look)
+  static List<BoxShadow> get softShadow => [
+    BoxShadow(
+      color: brandBlue.withValues(alpha: 0.08),
+      blurRadius: 24,
+      spreadRadius: 0,
+      offset: const Offset(0, 8),
+    ),
+    BoxShadow(
+      color: Colors.black.withValues(alpha: 0.03),
+      blurRadius: 4,
+      spreadRadius: 0,
+      offset: const Offset(0, 2),
+    ),
+  ];
+
+  // The shiny gradient for primary buttons
+  static const LinearGradient primaryGradient = LinearGradient(
+    colors: [Color(0xFF2AABEE), Color(0xFF229ED9)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+}
+
+
+============================================================
+FILE: lib/chat/ai_service.dart
+============================================================
+
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:http/http.dart' as http;
+import 'package:html/parser.dart' as parser;
+import '../ffi/dinor_bindings.dart';
+
+class DinorAI {
+  static Future<String> getResponse(String userMessage) async {
+    final msg = userMessage.toLowerCase().trim();
+
+    if (msg == 'hi' || msg == 'hello' || msg == 'hey') {
+      return "Hello! I am Dinor AI. My brain runs on C++. What do you want to know?";
+    }
+    if (msg.contains('your name')) {
+      return "I am Dinor AI, powered by a native C++ search engine. No external APIs!";
+    }
+
+    // Check internet before trying to search
+    final connectivityResult = await Connectivity().checkConnectivity();
+    if (connectivityResult.contains(ConnectivityResult.none)) {
+      return "I am currently offline. Please check your internet connection to search the web!";
+    }
+
+    try {
+      // 1. Fetch web results
+      final query = Uri.encodeComponent(userMessage);
+      final url = Uri.parse('https://html.duckduckgo.com/html/?q=$query');
+      
+      final response = await http.get(url, headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      });
+
+      if (response.statusCode == 200) {
+        var document = parser.parse(response.body);
+        
+        // Get all text from the result snippets
+        var snippets = document.getElementsByClassName('result__snippet');
+        if (snippets.isEmpty) return "I couldn't find any web results for that.";
+
+        // Combine all text into one giant string
+        String allText = snippets.map((e) => e.text.trim()).join(' ');
+
+        // 2. Send to C++ Core to extract the best sentence based on keywords
+        final core = DinorCore.load();
+        final bestAnswer = core.extractAiAnswer(userMessage, allText);
+
+        if (bestAnswer.isNotEmpty) {
+          return "Here is what I found:\n\n$bestAnswer";
+        } else {
+          // Fallback if C++ couldn't find a good match
+          return "I found some results, but they didn't directly answer your question. Here is the raw context:\n\n${allText.substring(0, 150)}...";
+        }
+      }
+      return "My web search failed (Status: ${response.statusCode}).";
+    } catch (e) {
+      return "Oops, I lost my internet connection. Error: $e";
+    }
+  }
+}
+
+
+============================================================
+FILE: native/src/dinor_core.h
+============================================================
+
+#pragma once
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+const char* dinor_version();
+int dinor_encrypt(const char* plaintext, char* out, int out_len);
+int dinor_fast_search(const char* haystack, const char* needle);
+int dinor_format_message(const char* input, char* out, int out_len);
+
+// New AI Web Parser Function
+int dinor_extract_web_answer(const char* query, const char* html_text, char* out, int out_len);
+
+#ifdef __cplusplus
+}
+#endif
+
+
+============================================================
+FILE: native/src/dinor_core.cpp
+============================================================
+
+#include "dinor_core.h"
+#include <cstring>
+#include <cctype>
+#include <string>
+#include <sstream>
+#include <vector>
+#include <algorithm>
+
+extern "C" {
+
+const char* dinor_version() {
+    return "Dinor 0.3.0 (AI Core)";
+}
+
+int dinor_encrypt(const char* plaintext, char* out, int out_len) {
+    int n = strlen(plaintext);
+    if (n + 1 > out_len) return -1;
+    for (int i = 0; i < n; i++) out[i] = plaintext[n - 1 - i];
+    out[n] = '\0';
+    return n;
+}
+
+int dinor_fast_search(const char* haystack, const char* needle) {
+    if (!*needle) return 1;
+    for (const char* h = haystack; *h; ++h) {
+        const char* h_ptr = h;
+        const char* n_ptr = needle;
+        while (*h_ptr && *n_ptr && (tolower(*h_ptr) == tolower(*n_ptr))) {
+            h_ptr++; n_ptr++;
+        }
+        if (!*n_ptr) return 1;
+    }
+    return 0;
+}
+
+int dinor_format_message(const char* input, char* out, int out_len) {
+    std::string result;
+    bool last_was_space = true;
+    for (const char* p = input; *p; ++p) {
+        if (*p == ' ') {
+            if (!last_was_space) { result += ' '; last_was_space = true; }
+        } else {
+            result += *p; last_was_space = false;
+        }
+    }
+    if (!result.empty() && result.back() == ' ') result.pop_back();
+    if (result.length() + 1 > out_len) return -1;
+    strcpy(out, result.c_str());
+    return result.length();
+}
+
+// AI Logic: Find the sentence in the web text that best matches the user's query
+int dinor_extract_web_answer(const char* query, const char* html_text, char* out, int out_len) {
+    std::string text(html_text);
+    std::string q(query);
+    std::string best_sentence = "";
+    int max_matches = 0;
+
+    // Split HTML/text into sentences (naive splitting by punctuation)
+    std::stringstream ss(text);
+    std::string sentence;
+    
+    // Clean the query into words
+    std::vector<std::string> keywords;
+    std::stringstream qss(q);
+    std::string word;
+    while (qss >> word) {
+        // Remove punctuation from keyword
+        word.erase(std::remove_if(word.begin(), word.end(), ::ispunct), word.end());
+        if (word.length() > 2) keywords.push_back(word);
+    }
+
+    while (std::getline(ss, sentence, '.')) {
+        // Trim leading spaces
+        sentence.erase(0, sentence.find_first_not_of(" \n\r\t"));
+        sentence.erase(sentence.find_last_not_of(" \n\r\t") + 1);
+
+        if (sentence.length() < 20 || sentence.length() > 300) continue;
+
+        int matches = 0;
+        for (const auto& kw : keywords) {
+            if (dinor_fast_search(sentence.c_str(), kw.c_str())) matches++;
+        }
+
+        if (matches > max_matches) {
+            max_matches = matches;
+            best_sentence = sentence + ".";
+        }
+    }
+
+    if (best_sentence.empty()) return -1; // No good sentence found
+
+    if (best_sentence.length() + 1 > out_len) return -1;
+    strcpy(out, best_sentence.c_str());
+    return best_sentence.length();
+}
+
+}
+
+
+============================================================
+FILE: pubspec.yaml
+============================================================
+
+name: dinor
+description: "A new Flutter project."
+# The following line prevents the package from being accidentally published to
+# pub.dev using `flutter pub publish`. This is preferred for private packages.
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+# The following defines the version and build number for your application.
+# A version number is three numbers separated by dots, like 1.2.43
+# followed by an optional build number separated by a +.
+# Both the version and the builder number may be overridden in flutter
+# build by specifying --build-name and --build-number, respectively.
+# In Android, build-name is used as versionName while build-number used as versionCode.
+# Read more about Android versioning at https://developer.android.com/studio/publish/versioning
+# In iOS, build-name is used as CFBundleShortVersionString while build-number is used as CFBundleVersion.
+# Read more about iOS versioning at
+# https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
+# In Windows, build-name is used as the major, minor, and patch parts
+# of the product and file versions while build-number is used as the build suffix.
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+# Dependencies specify other packages that your package needs in order to work.
+# To automatically upgrade your package dependencies to the latest versions
+# consider running `flutter pub upgrade --major-versions`. Alternatively,
+# dependencies can be manually updated by changing the version numbers below to
+# the latest version available on pub.dev. To see which dependencies have newer
+# versions available, run `flutter pub outdated`.
+dependencies:
+  flutter:
+    sdk: flutter
+  ffi: ^2.1.0
+
+  # The following adds the Cupertino Icons font to your application.
+  # Use with the CupertinoIcons class for iOS style icons.
+  cupertino_icons: ^1.0.8
+  http: ^1.6.0
+  html: ^0.15.7
+  permission_handler: ^11.3.1
+  photo_manager: ^3.12.0
+  giphy_get: ^3.6.1+1
+  connectivity_plus: ^7.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  # The "flutter_lints" package below contains a set of recommended lints to
+  # encourage good coding practices. The lint set provided by the package is
+  # activated in the `analysis_options.yaml` file located at the root of your
+  # package. See that file for information about deactivating specific lint
+  # rules and activating additional ones.
+  flutter_lints: ^6.0.0
+
+# For information on the generic Dart part of this file, see the
+# following page: https://dart.dev/tools/pub/pubspec
+
+# The following section is specific to Flutter packages.
+flutter:
+
+  # The following line ensures that the Material Icons font is
+  # included with your application, so that you can use the icons in
+  # the material Icons class.
+  uses-material-design: true
+
+  # To add assets to your application, add an assets section, like this:
+  # assets:
+  #   - images/a_dot_burr.jpeg
+  #   - images/a_dot_ham.jpeg
+
+  # An image asset can refer to one or more resolution-specific "variants", see
+  # https://flutter.dev/to/resolution-aware-images
+
+  # For details regarding adding assets from package dependencies, see
+  # https://flutter.dev/to/asset-from-package
+
+  # To add custom fonts to your application, add a fonts section here,
+  # in this "flutter" section. Each entry in this list should have a
+  # "family" key with the font family name, and a "fonts" key with a
+  # list giving the asset and other descriptors for the font. For
+  # example:
+  # fonts:
+  #   - family: Schyler
+  #     fonts:
+  #       - asset: fonts/Schyler-Regular.ttf
+  #       - asset: fonts/Schyler-Italic.ttf
+  #         style: italic
+  #   - family: Trajan Pro
+  #     fonts:
+  #       - asset: fonts/TrajanPro.ttf
+  #       - asset: fonts/TrajanPro_Bold.ttf
+  #         weight: 700
+  #
+  # For details regarding fonts from package dependencies,
+  # see https://flutter.dev/to/font-from-package
+
+
+============================================================
+FILE: android/app/build.gradle.kts
+============================================================
+
+plugins {
+    id("com.android.application")
+    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    id("dev.flutter.flutter-gradle-plugin")
+}
+
+android {
+    namespace = "com.dinor.dinor"
+    compileSdk = 36
+    ndkVersion = flutter.ndkVersion
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    defaultConfig {
+        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        applicationId = "com.dinor.dinor"
+        // You can update the following values to match your application needs.
+        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        minSdk = flutter.minSdkVersion
+        targetSdk = flutter.targetSdkVersion
+        // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
+        // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
+        // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
+        // flag during build.
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+    }
+
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("../../native/CMakeLists.txt")
+        }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+
+flutter {
+    source = "../.."
+}
+
+
+============================================================
+FILE: android/app/src/main/AndroidManifest.xml
+============================================================
+
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Permissions for Media Picker -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+
+    <application
+        android:label="dinor"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+    
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+    </queries>
+</manifest>
