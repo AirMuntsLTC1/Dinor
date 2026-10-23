@@ -43,6 +43,7 @@ dependencies:
   connectivity_plus: ^7.3.2
   supabase_flutter: ^2.18.3
   url_launcher: ^6.3.3
+  google_sign_in: ^7.2.0
 
 dev_dependencies:
   flutter_test:
