@@ -4,6 +4,8 @@ import 'dart:math';
 import '../ffi/dinor_bindings.dart';
 import '../chat/ai_service.dart';
 import 'ai_avatar.dart';
+import 'media_picker.dart';
+import 'emoji_picker.dart';
 
 class Message {
   final String text;
@@ -217,10 +219,26 @@ class _ChatScreenState extends State<ChatScreen> {
             color: Colors.white,
             child: SafeArea(
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
+                  // Media Icon
+                  IconButton(
+                    icon: const Icon(Icons.add_photo_alternate_outlined, color: Colors.grey),
+                    onPressed: () {
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (context) => const CustomMediaPicker(),
+                      );
+                    },
+                  ),
+                  
+                  // Text Input
                   Expanded(
                     child: Container(
                       key: _inputKey,
+                      margin: const EdgeInsets.symmetric(vertical: 6),
                       decoration: BoxDecoration(
                         color: Colors.grey[100],
                         borderRadius: BorderRadius.circular(24),
@@ -238,7 +256,40 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  
+                  // Emoji Icon
+                  IconButton(
+                    icon: const Icon(Icons.emoji_emotions_outlined, color: Colors.grey),
+                    onPressed: () {
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (context) => CustomEmojiPicker(
+                          onEmojiSelected: (emoji) {
+                            // Add the emoji to the text field
+                            final newText = _textController.text + emoji;
+                            _textController.value = TextEditingValue(
+                              text: newText,
+                              selection: TextSelection.collapsed(offset: newText.length),
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  ),
+                  
+                  // GIF Icon
+                  IconButton(
+                    icon: const Icon(Icons.gif_box_outlined, color: Colors.grey),
+                    onPressed: () {
+                      // GIF logic later
+                    },
+                  ),
+
+                  const SizedBox(width: 4),
+
+                  // Send Button
                   CircleAvatar(
                     backgroundColor: brandBlue,
                     child: IconButton(
