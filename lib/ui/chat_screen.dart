@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
@@ -45,9 +44,6 @@ class _ChatScreenState extends State<ChatScreen> {
   final GlobalKey _inputKey = GlobalKey();
   bool _isAiTyping = false;
   
-  Message? _selectedMessage;
-  int? _selectedMessageIndex;
-  OverlayEntry? _menuOverlay;
 
   final supabase = Supabase.instance.client;
   RealtimeChannel? _chatChannel;
@@ -225,8 +221,6 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  void _showMessageMenu(BuildContext context, int index, Message msg) { /* Keep existing logic */ }
-  void _closeMessageMenu() { /* Keep existing logic */ }
 
   @override
   Widget build(BuildContext context) {
@@ -280,6 +274,7 @@ class _ChatScreenState extends State<ChatScreen> {
             child: ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.all(16),
+              // ignore: deprecated_member_use
               cacheExtent: 1000.0,
               itemCount: _messages.length + (_isAiTyping ? 1 : 0),
               itemBuilder: (context, index) {
@@ -340,19 +335,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           ),
                   );
 
-                final interactiveBubble = Builder(
-                  builder: (bubbleContext) {
-                    return GestureDetector(
-                      onLongPress: () => _showMessageMenu(bubbleContext, index, msg),
-                      child: AnimatedScale(
-                        scale: _selectedMessageIndex == index ? 1.1 : 1.0,
-                        duration: const Duration(milliseconds: 200),
-                        curve: Curves.easeOutBack,
-                        child: messageBubble,
-                      ),
-                    );
-                  }
-                );
+                final interactiveBubble = messageBubble;
 
                 return Align(
                   alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
