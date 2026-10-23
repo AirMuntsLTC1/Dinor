@@ -17,7 +17,6 @@ void main() async {
   await Supabase.initialize(
     url: 'https://skvgbzftnbditpztqewl.supabase.co',
     publishableKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNrdmdiemZ0bmJkaXRwenRxZXdsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI3NDA1NDEsImV4cCI6MjEwODMxNjU0MX0.zHDtiHxAUBb-n2HpXjBbOHaO58pp4SgF__r9zq5JmkM',
-    // Supabase automatically uses SharedPreferences on Android/iOS by default!
   );
   
   runApp(const DinorApp());
@@ -30,44 +29,68 @@ class DinorApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return InternetBanner(
       child: MaterialApp(
-      title: 'Dinor',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        fontFamily: 'Roboto',
-        brightness: Brightness.dark, // Force Dark Mode
-        scaffoldBackgroundColor: DinorTheme.bgDark,
-        splashFactory: NoSplash.splashFactory, 
-        highlightColor: Colors.transparent,    
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: DinorTheme.brandBlue,
+        title: 'Dinor',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          useMaterial3: true,
+          fontFamily: 'Roboto',
           brightness: Brightness.dark,
-          primary: DinorTheme.brandBlue,
-          onPrimary: Colors.white,
-          surface: DinorTheme.surfaceDark,
-          onSurface: Colors.white,
+          scaffoldBackgroundColor: DinorTheme.bgDark,
+          splashFactory: NoSplash.splashFactory, 
+          highlightColor: Colors.transparent,    
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: DinorTheme.brandBlue,
+            brightness: Brightness.dark,
+            primary: DinorTheme.brandBlue,
+            onPrimary: Colors.white,
+            surface: DinorTheme.surfaceDark,
+            onSurface: Colors.white,
+          ),
+          textTheme: const TextTheme(
+            bodyMedium: TextStyle(fontFamily: 'Roboto', color: Colors.white),
+            bodyLarge: TextStyle(fontFamily: 'Roboto', color: Colors.white),
+            titleMedium: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w600, color: Colors.white),
+            titleLarge: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.bold, color: Colors.white),
+          ),
+          appBarTheme: const AppBarTheme(
+            backgroundColor: DinorTheme.bgDark,
+            foregroundColor: Colors.white,
+            elevation: 0,
+          ),
         ),
-        textTheme: const TextTheme(
-          bodyMedium: TextStyle(fontFamily: 'Roboto', color: Colors.white),
-          bodyLarge: TextStyle(fontFamily: 'Roboto', color: Colors.white),
-          titleMedium: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.w600, color: Colors.white),
-          titleLarge: TextStyle(fontFamily: 'Roboto', fontWeight: FontWeight.bold, color: Colors.white),
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: DinorTheme.bgDark, // Match the dark background
-          foregroundColor: Colors.white,
-          elevation: 0,
-        ),
-        floatingActionButtonTheme: const FloatingActionButtonThemeData(
-          backgroundColor: DinorTheme.brandBlue,
-          foregroundColor: Colors.white,
-        ),
+        home: const AuthGate(),
       ),
-        // If user is already logged in, go to Home, else Login
-        home: Supabase.instance.client.auth.currentSession != null
-            ? const HomeScreen()
-            : const LoginScreen(),
-      ),
+    );
+  }
+}
+
+// This widget listens to Supabase session changes automatically
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<AuthState>(
+      stream: Supabase.instance.client.auth.onAuthStateChange,
+      builder: (context, snapshot) {
+        // 1. Show loading while Supabase reads the local storage
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: DinorTheme.bgDark,
+            body: Center(child: CircularProgressIndicator(color: DinorTheme.brandBlue)),
+          );
+        }
+
+        // 2. Get the current session
+        final session = snapshot.data?.session ?? Supabase.instance.client.auth.currentSession;
+
+        // 3. Route based on session
+        if (session != null) {
+          return const HomeScreen();
+        } else {
+          return const LoginScreen();
+        }
+      },
     );
   }
 }
@@ -188,7 +211,9 @@ FILE: lib/ui/home_screen.dart
 ============================================================
 
 import 'package:flutter/material.dart';
-import '../ffi/dinor_bindings.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../chat/chat_service.dart';
 import 'chat_screen.dart';
 import 'ai_avatar.dart';
 import 'bottom_nav.dart';
@@ -204,28 +229,77 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  String _nativeStatus = 'Checking core...';
-  int _currentIndex = 0; // 0 = Chats, 1 = Friends, 2 = Settings, 3 = Profile
-  int _drawerPage = 0; // 0 = Messages, 1 = Home (Social Media)
-
-  final List<Map<String, String>> _chats = [
-    {'name': 'Alice', 'msg': 'Hey, are we still on for tomorrow?', 'time': '10:45 AM'},
-    {'name': 'Bob', 'msg': 'Sent the files over.', 'time': 'Yesterday'},
-    {'name': 'Project Dinor', 'msg': 'Build successful!', 'time': 'Monday'},
-  ];
+  int _currentIndex = 0;
+  int _drawerPage = 0;
+  final supabase = Supabase.instance.client;
+  
+  List<Map<String, dynamic>> _conversations = [];
+  List<Map<String, dynamic>> _searchResults = [];
+  bool _isSearching = false;
+  final FocusNode _searchFocus = FocusNode();
 
   @override
   void initState() {
     super.initState();
-    _checkNativeCore();
+    _listenToConversations();
   }
 
-  void _checkNativeCore() {
+  @override
+  void dispose() {
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
+  void _listenToConversations() {
+    // 1. Fetch initial conversations with profiles
+    _fetchConversations();
+
+    // 2. Listen to changes in messages or conversations to trigger a refresh
+    supabase.channel('public:messages_refresh')
+      .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'conversations',
+        callback: (payload) => _fetchConversations(),
+      ).subscribe();
+  }
+
+  Future<void> _fetchConversations() async {
     try {
-      final core = DinorCore.load();
-      setState(() => _nativeStatus = core.version());
+      final data = await ChatService.getMyConversations();
+      if (mounted) {
+        setState(() => _conversations = data);
+      }
     } catch (e) {
-      setState(() => _nativeStatus = 'Core offline');
+      debugPrint("Error fetching conversations: $e");
+    }
+  }
+
+  Future<void> _searchUsers(String query) async {
+    if (query.isEmpty) {
+      setState(() { _isSearching = false; _searchResults = []; });
+      return;
+    }
+    setState(() => _isSearching = true);
+    try {
+      final results = await ChatService.searchUsers(query);
+      setState(() => _searchResults = results);
+    } catch (e) {
+      debugPrint("Search error: $e");
+      setState(() => _searchResults = []);
+    }
+  }
+
+  Future<void> _openChat(String otherUserId, String name) async {
+    _searchFocus.unfocus(); // Hide keyboard before navigating
+    final convId = await ChatService.getOrCreateConversation(otherUserId);
+    if (mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ChatScreen(title: name, conversationId: convId, otherUserId: otherUserId),
+        ),
+      );
     }
   }
 
@@ -235,198 +309,163 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       backgroundColor: DinorTheme.bgDark,
-      // Add the Side Drawer
       drawer: SideDrawer(
         onHomeTap: () => setState(() => _drawerPage = 1),
         onMessagesTap: () => setState(() => _drawerPage = 0),
       ),
       body: SafeArea(
-        child: _currentIndex == 3
-          ? const ProfileScreen() // Show Profile when index is 3
-          : _drawerPage == 0 
+        child: _drawerPage == 0 
           ? Column(
           children: [
-            // 1. Top Header
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Row(
                 children: [
                   Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: brandBlue.withValues(alpha: 0.15),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: brandBlue, width: 1.5),
-                    ),
+                    width: 40, height: 40,
+                    decoration: BoxDecoration(color: brandBlue.withValues(alpha: 0.15), shape: BoxShape.circle, border: Border.all(color: brandBlue, width: 1.5)),
                     child: const Icon(Icons.person, color: brandBlue, size: 24),
                   ),
                   const SizedBox(width: 12),
-                  const Text(
-                    'Dinor',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: brandBlue),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.more_vert, color: DinorTheme.textGrey),
-                    onPressed: () {},
-                  ),
+                  const Text('Dinor', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: brandBlue)),
                 ],
               ),
             ),
-
-            // 2. Search Bar
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Container(
-                decoration: BoxDecoration(
-                  color: DinorTheme.surfaceDark,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: DinorTheme.softShadow,
-                ),
+                decoration: BoxDecoration(color: DinorTheme.surfaceDark, borderRadius: BorderRadius.circular(16), boxShadow: DinorTheme.softShadow),
                 child: TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Search messages...',
-                    hintStyle: const TextStyle(color: DinorTheme.textGrey),
-                    prefixIcon: const Icon(Icons.search, color: DinorTheme.textGrey),
-                    filled: false,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: BorderSide.none,
+                  focusNode: _searchFocus,
+                  autofocus: false, // Prevents the keyboard from popping up automatically
+                  onChanged: _searchUsers,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(hintText: 'Search users...', hintStyle: TextStyle(color: DinorTheme.textGrey), prefixIcon: Icon(Icons.search, color: DinorTheme.textGrey), border: InputBorder.none, contentPadding: EdgeInsets.symmetric(vertical: 14)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (!_isSearching)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: GestureDetector(
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ChatScreen(title: 'Dinor AI', isAi: true))),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(gradient: DinorTheme.primaryGradient, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: brandBlue.withValues(alpha: 0.3), blurRadius: 20, offset: const Offset(0, 8))]),
+                    child: Row(
+                      children: [
+                        const AnimatedAIAvatar(size: 48),
+                        const SizedBox(width: 16),
+                        const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Dinor AI Assistant', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)), SizedBox(height: 4), Text('Ask me anything!', style: TextStyle(color: Colors.white70, fontSize: 13))])),
+                        Icon(Icons.arrow_forward_ios, color: Colors.white.withValues(alpha: 0.7), size: 16),
+                      ],
                     ),
                   ),
                 ),
               ),
-            ),
-
-            const SizedBox(height: 8),
-
-            // 3. Custom AI Conversation Card
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const ChatScreen(title: 'Dinor AI', isAi: true),
-                    ),
-                  );
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    gradient: DinorTheme.primaryGradient,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: brandBlue.withValues(alpha: 0.3),
-                        blurRadius: 20,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    children: [
-                      const AnimatedAIAvatar(size: 48),
-                      const SizedBox(width: 16),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+            const SizedBox(height: 16),
+            Expanded(
+              child: ListView.separated(
+                itemCount: _isSearching ? _searchResults.length : _conversations.length,
+                separatorBuilder: (context, index) => const SizedBox(height: 4),
+                itemBuilder: (context, index) {
+                  if (_isSearching) {
+                    final user = _searchResults[index];
+                    return ListTile(
+                      leading: CircleAvatar(backgroundColor: brandBlue, child: Text(user['username'][0].toUpperCase())),
+                      title: Text(user['username'], style: const TextStyle(color: Colors.white)),
+                      onTap: () => _openChat(user['id'], user['username']),
+                    );
+                  } else {
+                    final conv = _conversations[index];
+                    final myId = supabase.auth.currentUser!.id;
+                    
+                    // Safely extract the nested user object
+                    final otherUser = conv['user1_id'] == myId ? conv['user2'] : conv['user1'];
+                    final otherName = (otherUser != null && otherUser['username'] != null) ? otherUser['username'] : 'Unknown';
+                    final otherId = otherUser != null ? otherUser['id'] : '';
+                    
+                    return Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                      decoration: BoxDecoration(color: DinorTheme.surfaceDark, borderRadius: BorderRadius.circular(16), boxShadow: DinorTheme.softShadow),
+                      child: ListTile(
+                        hoverColor: Colors.transparent, splashColor: Colors.transparent, focusColor: Colors.transparent,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        leading: CircleAvatar(backgroundColor: brandBlue.withValues(alpha: 0.15), child: Text(otherName[0].toUpperCase(), style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold))),
+                        title: Text(otherName, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
+                        subtitle: Text(conv['last_message'] ?? 'No messages yet', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: DinorTheme.textGrey)),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(
-                              'Dinor AI Assistant',
-                              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
-                            SizedBox(height: 4),
-                            Text(
-                              'Ask me anything!',
-                              style: TextStyle(color: Colors.white70, fontSize: 13),
+                            // 1. Thumbnail for Images / Videos
+                            if (conv['latest_message'] != null && 
+                                conv['latest_message'].isNotEmpty &&
+                                conv['latest_message'][0]['is_image'] == true)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 8.0),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      CachedNetworkImage(
+                                        imageUrl: conv['latest_message'][0]['content'],
+                                        width: 40,
+                                        height: 40,
+                                        fit: BoxFit.cover,
+                                        placeholder: (c, u) => Container(width: 40, height: 40, color: Colors.grey[800]),
+                                        errorWidget: (c, u, e) => Container(width: 40, height: 40, color: Colors.grey[800], child: const Icon(Icons.broken_image, size: 16)),
+                                      ),
+                                      // If the URL contains "video" or is a known video format, show a pause icon
+                                      if (conv['latest_message'][0]['content'].toString().contains('.mp4') || 
+                                          conv['latest_message'][0]['content'].toString().contains('video'))
+                                        Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black.withValues(alpha: 0.5),
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(Icons.pause, color: Colors.white, size: 16),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            
+                            // 2. Unread Badge
+                            FutureBuilder<int>(
+                              future: ChatService.getUnreadCount(conv['id']),
+                              builder: (context, snapshot) {
+                                if (snapshot.hasData && snapshot.data! > 0) {
+                                  return Container(padding: const EdgeInsets.all(6), decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle), child: Text(snapshot.data.toString(), style: const TextStyle(color: Colors.white, fontSize: 12)));
+                                }
+                                return const SizedBox.shrink();
+                              },
                             ),
                           ],
                         ),
+                        onTap: () => _openChat(otherId, otherName),
                       ),
-                      Icon(Icons.arrow_forward_ios, color: Colors.white.withValues(alpha: 0.7), size: 16),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 16),
-
-            // 4. Chat List
-            Expanded(
-              child: ListView.separated(
-                itemCount: _chats.length,
-                separatorBuilder: (context, index) => const SizedBox(height: 4),
-                itemBuilder: (context, index) {
-                  final chat = _chats[index];
-                  return Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: DinorTheme.surfaceDark,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: DinorTheme.softShadow,
-                    ),
-                    child: ListTile(
-                    hoverColor: Colors.transparent,
-                    splashColor: Colors.transparent,
-                    focusColor: Colors.transparent,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    leading: CircleAvatar(
-                      backgroundColor: brandBlue.withValues(alpha: 0.15),
-                      child: Text(
-                        chat['name']![0],
-                        style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    title: Text(chat['name']!, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
-                    subtitle: Text(chat['msg']!, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: DinorTheme.textGrey)),
-                    trailing: Text(chat['time']!, style: const TextStyle(fontSize: 12, color: DinorTheme.textGrey)),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => ChatScreen(title: chat['name']!),
-                        ),
-                      );
-                    },
-                  ),
-                  );
+                    );
+                  }
                 },
               ),
             ),
-            
-            // 5. Floating Bottom Navigation Bar
             CustomBottomNav(
               currentIndex: _currentIndex,
               onTap: (index) {
-                setState(() => _currentIndex = index);
+                _searchFocus.unfocus(); // Hide keyboard when tapping bottom nav
+                if (index == 3) {
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen())).then((_) => setState(() => _currentIndex = 0));
+                } else {
+                  setState(() => _currentIndex = index);
+                }
               },
-            ),
-
-            // 6. Native Core Status Footer
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              color: DinorTheme.surfaceDark,
-              child: Text(
-                'Native Core: $_nativeStatus',
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 10, color: Colors.black54),
-              ),
             ),
           ],
           )
-          : const Center(
-              child: Text(
-                'Home Feed (Social Media)\nComing Soon!', 
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white, fontSize: 18),
-              ),
-            ),
+          : const Center(child: Text('Home Feed\nComing Soon!', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 18))),
       ),
     );
   }
@@ -441,10 +480,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:io';
+import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../ffi/dinor_bindings.dart';
 import '../chat/ai_service.dart';
+import '../chat/chat_service.dart';
 import 'ai_avatar.dart';
 import 'media_picker.dart';
 import 'emoji_picker.dart';
@@ -462,8 +504,10 @@ class Message {
 class ChatScreen extends StatefulWidget {
   final String title;
   final bool isAi;
+  final String? conversationId;
+  final String? otherUserId;
 
-  const ChatScreen({super.key, required this.title, this.isAi = false});
+  const ChatScreen({super.key, required this.title, this.isAi = false, this.conversationId, this.otherUserId});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -506,6 +550,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     
     _currentUserId = supabase.auth.currentUser?.id;
+    if (widget.conversationId != null) await ChatService.markAsRead(widget.conversationId!);
     _fetchMessages();
 
     _chatChannel = supabase.channel('public:messages')
@@ -532,7 +577,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _fetchMessages() async {
     try {
-      final data = await supabase.from('messages').select().order('created_at', ascending: true);
+      final data = await supabase.from('messages').select().eq('conversation_id', widget.conversationId ?? '').order('created_at', ascending: true);
       setState(() {
         _messages.clear();
         for (var row in data) {
@@ -590,11 +635,11 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  void _triggerAiResponse(String userText) async {
+  void _triggerAiResponse(String userText, {String? imageBase64}) async {
     setState(() => _isAiTyping = true);
     _scrollToBottom();
     try {
-      String response = await DinorAI.getResponse(userText);
+      String response = await DinorAI.getResponse(userText, imageBase64: imageBase64);
       if (!mounted) return;
       setState(() {
         _isAiTyping = false;
@@ -842,9 +887,32 @@ class _ChatScreenState extends State<ChatScreen> {
                             children: [
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
-                                child: msg.text.startsWith('http')
-                                    ? Image.network(msg.text, width: 200, fit: BoxFit.cover, cacheWidth: 400, errorBuilder: (c, e, s) => const Icon(Icons.broken_image, color: Colors.white))
-                                    : Image.file(File(msg.text), width: 200, fit: BoxFit.cover, cacheWidth: 400, errorBuilder: (c, e, s) => const Icon(Icons.broken_image, color: Colors.white)),
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    msg.text.startsWith('http')
+                                        ? CachedNetworkImage(
+                                            imageUrl: msg.text, 
+                                            width: 200, 
+                                            fit: BoxFit.cover, 
+                                            memCacheWidth: 400,
+                                            placeholder: (context, url) => const SizedBox(width: 200, height: 150, child: Center(child: CircularProgressIndicator(color: Colors.white))),
+                                            errorWidget: (context, url, error) => const Icon(Icons.broken_image, color: Colors.white),
+                                          )
+                                        : Image.file(File(msg.text), width: 200, fit: BoxFit.cover, cacheWidth: 400, errorBuilder: (c, e, s) => const Icon(Icons.broken_image, color: Colors.white)),
+                                    
+                                    // Show a pause icon if it's a video
+                                    if (msg.text.contains('.mp4') || msg.text.contains('video'))
+                                      Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(alpha: 0.5),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(Icons.pause, color: Colors.white, size: 32),
+                                      ),
+                                  ],
+                                ),
                               ),
                               if (msg.caption != null && msg.caption!.isNotEmpty)
                                 Padding(
@@ -926,15 +994,41 @@ class _ChatScreenState extends State<ChatScreen> {
                                   final file = await asset.file;
                                   if (file != null) {
                                     if (widget.isAi) {
+                                      // Convert the file to Base64
+                                      final bytes = await file.readAsBytes();
+                                      final base64String = base64Encode(bytes);
+
                                       setState(() {
                                         _messages.add(Message(DateTime.now().toString(), file.path, true, isImage: true, caption: caption.isNotEmpty ? caption : null));
                                       });
+                                      _scrollToBottom();
+                                      
+                                      // Trigger AI with the image
+                                      _triggerAiResponse(
+                                        caption.isNotEmpty ? caption : "Examine this image and tell me what you see.", 
+                                        imageBase64: base64String
+                                      );
                                     } else if (_currentUserId != null) {
+                                      // 1. Upload to Supabase Storage (Bucket: 'chat_media')
+                                      final fileName = '${DateTime.now().millisecondsSinceEpoch}_$_currentUserId.jpg';
+                                      await supabase.storage.from('chat_media').upload(fileName, file);
+                                      
+                                      // 2. Get the public URL
+                                      final publicUrl = supabase.storage.from('chat_media').getPublicUrl(fileName);
+
+                                      // 3. Save URL to DB
                                       await supabase.from('messages').insert({
                                         'sender_id': _currentUserId,
-                                        'content': file.path,
+                                        'content': publicUrl,
                                         'is_image': true,
+                                        'conversation_id': widget.conversationId,
                                       });
+                                      
+                                      // 4. Update conversation last message
+                                      await supabase.from('conversations').update({
+                                        'last_message': '📷 Photo',
+                                        'last_message_time': DateTime.now().toUtc().toIso8601String(),
+                                      }).eq('id', widget.conversationId!);
                                     }
                                   }
                                 }
@@ -974,18 +1068,36 @@ class _ChatScreenState extends State<ChatScreen> {
                                     final newText = _textController.text + emoji;
                                     _textController.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: newText.length));
                                   },
-                                  onGifSelected: (url) {
-                                    Navigator.pop(context);
+                                  onGifSelected: (url) async {
+                                    Navigator.pop(context); // Close the picker
+                                    
                                     if (widget.isAi) {
-                                       setState(() => _messages.add(Message(DateTime.now().toString(), url, true, isImage: true)));
-                                    } else if (_currentUserId != null) {
-                                       supabase.from('messages').insert({
-                                         'sender_id': _currentUserId,
-                                         'content': url,
-                                         'is_image': true,
-                                       });
+                                      setState(() {
+                                        _messages.add(Message(DateTime.now().toString(), url, true, isImage: true));
+                                      });
+                                      _scrollToBottom();
+                                    } else if (_currentUserId != null && widget.conversationId != null) {
+                                      try {
+                                        // Save the GIF URL to the database
+                                        await supabase.from('messages').insert({
+                                          'sender_id': _currentUserId,
+                                          'content': url,
+                                          'is_image': true,
+                                          'conversation_id': widget.conversationId,
+                                          'is_read': false,
+                                        });
+                                        
+                                        // Update the conversation last message
+                                        await supabase.from('conversations').update({
+                                          'last_message': '🎬 GIF',
+                                          'last_message_time': DateTime.now().toUtc().toIso8601String(),
+                                        }).eq('id', widget.conversationId!);
+                                        
+                                        _scrollToBottom();
+                                      } catch (e) {
+                                        debugPrint("Error sending GIF: $e");
+                                      }
                                     }
-                                    _scrollToBottom();
                                   },
                                 ),
                               );
@@ -1565,6 +1677,7 @@ FILE: lib/ui/emoji_picker.dart
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'dart:convert';
 import 'emoji_widget.dart';
@@ -1854,22 +1967,16 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
               color: Colors.black26,
             ),
             clipBehavior: Clip.hardEdge,
-            child: Image.network(
-              gifUrl,
+            child: CachedNetworkImage(
+              imageUrl: gifUrl,
               fit: BoxFit.cover,
-              cacheWidth: 200, // Force decode at low res for smooth scrolling
-              frameBuilder: (context, child, frame, wasSyncLoaded) {
-                if (wasSyncLoaded) return child;
-                if (frame == null) {
-                   return const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)));
-                }
-                return AnimatedOpacity(
-                  opacity: 1,
-                  duration: const Duration(milliseconds: 300),
-                  child: child,
-                );
-              },
-              errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, color: Colors.grey),
+              // Decodes the GIF at half the screen width to save RAM and make scrolling buttery smooth
+              memCacheWidth: (MediaQuery.of(context).size.width / 2 * MediaQuery.of(context).devicePixelRatio).round(),
+              placeholder: (context, url) => const Center(
+                child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+              ),
+              errorWidget: (context, url, error) => const Icon(Icons.broken_image, color: Colors.grey),
+              fadeInDuration: const Duration(milliseconds: 200),
             ),
           ),
         );
@@ -1901,27 +2008,30 @@ class CustomBottomNav extends StatelessWidget {
     const Color brandBlue = Color(0xFF229ED9);
 
     return Container(
-      // Smaller margins to make the whole bar more compact
-      margin: const EdgeInsets.only(left: 24, right: 24, bottom: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      margin: const EdgeInsets.only(left: 40, right: 40, bottom: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
         color: DinorTheme.surfaceDark,
         borderRadius: BorderRadius.circular(30),
         boxShadow: DinorTheme.softShadow,
       ),
+      // Use a Row with spaceEvenly and fixed widths to keep gaps small
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly, // Distributes items evenly without massive gaps
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           _buildNavItem(0, Icons.chat_bubble, Icons.chat_bubble_outline, 'Chats'),
+          const SizedBox(width: 12), // Tiny gap
           _buildNavItem(1, Icons.people, Icons.people_outline, 'Friends'),
+          const SizedBox(width: 12), // Tiny gap
           _buildNavItem(2, Icons.settings, Icons.settings_outlined, 'Settings'),
+          const SizedBox(width: 12), // Tiny gap
           
           // Profile Item (Custom Circle)
           GestureDetector(
             onTap: () => onTap(3),
             behavior: HitTestBehavior.opaque,
             child: SizedBox(
-              width: 60, // Fixed width to prevent jumping
+              width: 50, // Fixed width for the profile circle
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -1969,7 +2079,7 @@ class CustomBottomNav extends StatelessWidget {
       onTap: () => onTap(index),
       behavior: HitTestBehavior.opaque,
       child: SizedBox(
-        width: 60, // Fixed width for equal spacing
+        width: 50, // Fixed width for each item so they stay tight
         child: Column(
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1987,6 +2097,8 @@ class CustomBottomNav extends StatelessWidget {
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                 color: isSelected ? brandBlue : DinorTheme.textGrey,
               ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
@@ -2376,6 +2488,20 @@ class _LoginScreenState extends State<LoginScreen> {
       // Establish a persistent, real Supabase Auth session.
       await _supabase.auth.setSession(data['refresh_token'] as String);
 
+      // Automatically create a profile for the user if it doesn't exist
+      final user = _supabase.auth.currentUser;
+      if (user != null) {
+        final existingProfile = await _supabase.from('profiles').select().eq('id', user.id).maybeSingle();
+        if (existingProfile == null) {
+          // Use the email prefix as the default username (e.g., 'john' from 'john@gmail.com')
+          final defaultUsername = email.split('@')[0];
+          await _supabase.from('profiles').insert({
+            'id': user.id,
+            'username': defaultUsername,
+          });
+        }
+      }
+
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const HomeScreen()),
@@ -2608,12 +2734,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _signOut() async {
     await supabase.auth.signOut();
-    if (mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const Scaffold(body: Center(child: Text('Logged out')))),
-        (route) => false,
-      );
-    }
+    // The AuthGate in main.dart will automatically redirect to LoginScreen
   }
 
   @override
@@ -2631,6 +2752,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context), // Goes back to Home
+        ),
         title: const Text('Profile', style: TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: true,
       ),
@@ -2753,34 +2878,134 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class DinorAI {
-  static Future<String> getResponse(String userMessage) async {
-    final msg = userMessage.toLowerCase().trim();
-
-    if (msg == 'hi' || msg == 'hello' || msg == 'hey') {
-      return "Hello! I am Dinor AI. I am connected to the live web. What do you want to search?";
-    }
-
+  static Future<String> getResponse(String userMessage, {String? imageBase64}) async {
     final connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult.contains(ConnectivityResult.none)) {
       return "I am currently offline. Please check your internet connection.";
     }
 
+    final supabase = Supabase.instance.client;
+
     try {
-      final supabase = Supabase.instance.client;
       final response = await supabase.functions.invoke(
         'chat-ai',
-        body: {'userMessage': userMessage},
+        body: {
+          'userMessage': userMessage,
+          if (imageBase64 != null) 'imageBase64': imageBase64,
+        },
       );
 
-      if (response.status == 200 && response.data['reply'] != null) {
-        return response.data['reply'];
-      } else {
-        final errorMsg = response.data != null ? response.data.toString() : "Unknown error";
-        return "Error: $errorMsg (Status ${response.status})";
+      // Safely extract the reply
+      if (response.status == 200 && response.data != null) {
+        final data = response.data;
+        
+        // If it's a Map, look for the 'reply' key
+        if (data is Map && data['reply'] != null) {
+          return data['reply'].toString();
+        } 
+        // If it's a String, just return it
+        else if (data is String) {
+          return data;
+        }
       }
+      
+      return "I couldn't generate a response. Please try again. (Status: ${response.status})";
     } catch (e) {
-      return "Oops, I lost my connection. Error: $e";
+      return "Connection error: ${e.toString()}";
     }
+  }
+}
+
+
+============================================================
+FILE: lib/chat/chat_service.dart
+============================================================
+
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+class ChatService {
+  static final supabase = Supabase.instance.client;
+
+  // 1. Search for real users
+  static Future<List<Map<String, dynamic>>> searchUsers(String query) async {
+    final response = await supabase
+        .from('profiles')
+        .select()
+        .ilike('username', '%$query%')
+        .neq('id', supabase.auth.currentUser!.id)
+        .limit(10);
+    return List<Map<String, dynamic>>.from(response);
+  }
+
+  // 2. Create or get a conversation
+  static Future<String> getOrCreateConversation(String otherUserId) async {
+    final myId = supabase.auth.currentUser!.id;
+    
+    final existing = await supabase
+        .from('conversations')
+        .select()
+        .or('and(user1_id.eq.$myId,user2_id.eq.$otherUserId),and(user1_id.eq.$otherUserId,user2_id.eq.$myId)')
+        .maybeSingle();
+
+    if (existing != null) return existing['id'];
+
+    final newConv = await supabase
+        .from('conversations')
+        .insert({'user1_id': myId, 'user2_id': otherUserId})
+        .select()
+        .single();
+
+    return newConv['id'];
+  }
+
+  // 3. Fetch conversations with joined usernames
+  static Future<List<Map<String, dynamic>>> getMyConversations() async {
+    final myId = supabase.auth.currentUser!.id;
+    
+    // Fetch the conversation AND the latest message for the thumbnail
+    final response = await supabase
+        .from('conversations')
+        .select('''
+          *,
+          user1:profiles!conversations_user1_id_fkey(*),
+          user2:profiles!conversations_user2_id_fkey(*),
+          latest_message:messages!messages_conversation_id_fkey(content, is_image)
+        ''')
+        .or('user1_id.eq.$myId,user2_id.eq.$myId')
+        .order('last_message_time', ascending: false);
+        
+    return List<Map<String, dynamic>>.from(response);
+  }
+
+  // 4. Fetch messages for a conversation
+  static Future<List<Map<String, dynamic>>> getMessages(String conversationId) async {
+    final response = await supabase
+        .from('messages')
+        .select()
+        .eq('conversation_id', conversationId)
+        .order('created_at', ascending: true);
+    return List<Map<String, dynamic>>.from(response);
+  }
+
+  // 5. Mark messages as read
+  static Future<void> markAsRead(String conversationId) async {
+    await supabase
+        .from('messages')
+        .update({'is_read': true})
+        .eq('conversation_id', conversationId)
+        .neq('sender_id', supabase.auth.currentUser!.id)
+        .eq('is_read', false);
+  }
+
+  // 6. Get unread count
+  static Future<int> getUnreadCount(String conversationId) async {
+    final response = await supabase
+        .from('messages')
+        .select()
+        .eq('conversation_id', conversationId)
+        .neq('sender_id', supabase.auth.currentUser!.id)
+        .eq('is_read', false);
+    return response.length;
   }
 }
 
@@ -2970,6 +3195,81 @@ alter publication supabase_realtime add table public.messages;
 
 
 ============================================================
+FILE: supabase/migrations/20261023223018_create_conversations.sql
+============================================================
+
+-- 1. Create a "conversations" table to group messages
+create table public.conversations (
+  id uuid default gen_random_uuid() primary key,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  user1_id uuid references public.profiles(id) not null,
+  user2_id uuid references public.profiles(id) not null,
+  last_message text,
+  last_message_time timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 2. Add a conversation_id and read status to the messages table
+alter table public.messages 
+  add column conversation_id uuid references public.conversations(id) on delete cascade,
+  add column is_read boolean default false;
+
+-- 3. Turn on RLS for conversations
+alter table public.conversations enable row level security;
+
+create policy "Users can view their own conversations."
+on public.conversations for select
+using (auth.uid() = user1_id or auth.uid() = user2_id);
+
+create policy "Users can insert conversations."
+on public.conversations for insert
+with check (auth.uid() = user1_id or auth.uid() = user2_id);
+
+create policy "Users can update their own conversations."
+on public.conversations for update
+using (auth.uid() = user1_id or auth.uid() = user2_id);
+
+-- 4. Enable Realtime for conversations
+alter publication supabase_realtime add table public.conversations;
+
+
+============================================================
+FILE: supabase/migrations/20261023223829_storage_policies.sql
+============================================================
+
+
+-- 1. Allow public read access to chat_media
+create policy "Public Access"
+on storage.objects for select
+using ( bucket_id = 'chat_media' );
+
+-- 2. Allow authenticated users to upload to chat_media
+create policy "Auth Upload"
+on storage.objects for insert
+with check (
+  bucket_id = 'chat_media' 
+  AND auth.role() = 'authenticated'
+);
+
+
+============================================================
+FILE: supabase/migrations/20261023224911_profile_search_policy.sql
+============================================================
+
+
+-- Allow all authenticated users to view all profiles (so they can be searched)
+create policy "Authenticated users can view all profiles"
+on public.profiles for select
+to authenticated
+using (true);
+
+-- Allow users to update their own profile
+create policy "Users can update their own profile"
+on public.profiles for update
+to authenticated
+using (auth.uid() = id);
+
+
+============================================================
 FILE: supabase/functions/chat-ai/index.ts
 ============================================================
 
@@ -2980,99 +3280,115 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// Helper function to scrape DuckDuckGo (which indexes Google)
-async function searchWeb(query: string): Promise<string> {
+async function searchGoogleNews(query: string): Promise<string> {
   try {
-    const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      }
-    });
-    
-    const html = await response.text();
-    
-    // Extract snippets using regex (faster than DOM parsing in Deno)
-    const snippets: string[] = [];
-    const regex = /<a class="result__snippet[^>]*>(.*?)<\/a>/g;
-    let match;
-    
-    while ((match = regex.exec(html)) !== null && snippets.length < 4) {
-      // Remove HTML tags from the snippet
-      const cleanText = match[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-      if (cleanText.length > 20) {
-        snippets.push(cleanText);
+    const response = await fetch(`https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`);
+    const xml = await response.text();
+    const items: string[] = [];
+    const itemBlocks = xml.split('<item>');
+    for (let i = 1; i < itemBlocks.length && items.length < 5; i++) {
+      const titleMatch = itemBlocks[i].match(/<title>(.*?)<\/title>/);
+      if (titleMatch && titleMatch[1]) {
+        items.push(`- ${titleMatch[1].replace(/<[^>]+>/g, '').trim()}`);
       }
     }
-    
-    return snippets.join('\n\n');
-  } catch (e) {
-    console.error("Web search failed:", e);
-    return "";
-  }
+    return items.join('\n');
+  } catch (e) { return ""; }
 }
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const { userMessage } = await req.json()
-    
+    const body = await req.json();
+    const userMessage = body.userMessage || "Hello";
+    const imageBase64 = body.imageBase64;
+
     const groqApiKey = Deno.env.get('GROQ_API_KEY')
-    if (!groqApiKey) throw new Error("GROQ_API_KEY is not set in Supabase Secrets")
+    if (!groqApiKey) throw new Error("Missing GROQ_API_KEY")
 
-    // 1. Search the web for context
-    console.log(`Searching web for: ${userMessage}`);
-    const webContext = await searchWeb(userMessage);
+    const modelsRes = await fetch('https://api.groq.com/openai/v1/models', {
+      headers: { 'Authorization': `Bearer ${groqApiKey}` }
+    });
+    const modelsData = await modelsRes.json();
+    const availableModels: string[] = modelsData.data?.map((m: any) => m.id) || [];
 
-    // 2. Build the prompt
-    let prompt = "";
-    if (webContext) {
-      prompt = `Here are some recent search results from the web:\n\n${webContext}\n\nBased ONLY on the above context, answer the user's question:\n${userMessage}`;
-    } else {
-      prompt = `Answer this question using your general knowledge:\n${userMessage}`;
+    // -------------------------
+    // VISION MODEL
+    // -------------------------
+    if (imageBase64) {
+      const visionModel = "llama-3.2-11b-vision-preview";
+      if (!availableModels.includes(visionModel)) {
+        return new Response(JSON.stringify({ reply: "Vision model is not available on your Groq account." }), { headers: corsHeaders });
+      }
+
+      const visionRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${groqApiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: visionModel,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: userMessage },
+                { type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageBase64}` } }
+              ]
+            }
+          ],
+          max_tokens: 500,
+        }),
+      });
+
+      const visionData = await visionRes.json();
+      if (visionData.choices && visionData.choices.length > 0) {
+        return new Response(JSON.stringify({ reply: visionData.choices[0].message.content.trim() }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      throw new Error(`Vision failed: ${JSON.stringify(visionData)}`);
     }
 
-    // 3. Ask Groq (Llama 3.1)
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    // -------------------------
+    // TEXT MODEL
+    // -------------------------
+    const modelsToTry = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "allam-2-7b"]
+      .filter(m => availableModels.includes(m));
+    const model = modelsToTry[0];
+    if (!model) throw new Error("No text models available.");
+
+    const webContext = await searchGoogleNews(userMessage);
+    let finalPrompt = webContext 
+      ? `News context:\n${webContext}\n\nUser Question: ${userMessage}\n\nAnswer directly.`
+      : `User Question: ${userMessage}\n\nAnswer directly.`;
+
+    const finalRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${groqApiKey}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Authorization': `Bearer ${groqApiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
+        model: model,
         messages: [
-          { 
-            role: "system", 
-            content: "You are Dinor AI, a helpful web-searching assistant. Answer clearly and concisely." 
-          },
-          { 
-            role: "user", 
-            content: prompt 
-          }
+          { role: "system", content: "You are Dinor AI. Answer confidently." },
+          { role: "user", content: finalPrompt }
         ],
-        temperature: 0.3, // Lower temperature means it sticks closer to the facts
-        max_tokens: 300,
+        temperature: 0.3,
+        max_tokens: 400,
       }),
-    })
+    });
 
-    if (!res.ok) {
-      const errorData = await res.json();
-      throw new Error(JSON.stringify(errorData));
-    }
-
-    const data = await res.json()
-
-    if (data.choices && data.choices.length > 0) {
-      return new Response(JSON.stringify({ reply: data.choices[0].message.content.trim() }), {
+    const finalData = await finalRes.json();
+    if (finalData.choices && finalData.choices.length > 0) {
+      return new Response(JSON.stringify({ reply: finalData.choices[0].message.content.trim() }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    } else {
-      throw new Error("No response from AI")
+      });
     }
+    
+    throw new Error(`AI failed: ${JSON.stringify(finalData)}`);
+
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 400,
+    // Catch ANY error and return it as a clean string reply
+    return new Response(JSON.stringify({ reply: `AI Error: ${error.message}` }), {
+      status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
@@ -3640,144 +3956,89 @@ jobs:
 
 
 ============================================================
-FILE: android/app/src/main/AndroidManifest.xml
+FILE: android/app/src/main/kotlin/com/dinor/dinor/MainActivity.kt
 ============================================================
 
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Permissions for Media Picker -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+package com.dinor.dinor
 
-    <application
-        android:label="Dinor"
-        android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:launchMode="singleTop"
-            android:taskAffinity=""
-            android:theme="@style/LaunchTheme"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
-            android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize">
-            
-            <meta-data
-              android:name="io.flutter.embedding.android.NormalTheme"
-              android:resource="@style/NormalTheme"
-              />
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
+import io.flutter.embedding.android.FlutterActivity
 
-            <!-- Deep linking for OAuth -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="com.dinor.dinor" android:host="login-callback" />
-            </intent-filter>
-
-        </activity>
-        
-        <meta-data
-            android:name="flutterEmbedding"
-            android:value="2" />
-    </application>
-    
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.PROCESS_TEXT"/>
-            <data android:mimeType="text/plain"/>
-        </intent>
-    </queries>
-</manifest>
+class MainActivity : FlutterActivity()
 
 
 ============================================================
-FILE: android/app/src/main/res/values/styles.xml
+FILE: android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
 ============================================================
 
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Theme applied to the Android Window while the process is starting when the OS's Dark Mode setting is off -->
-    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
-        <!-- Show a splash screen on the activity. Automatically removed when
-             the Flutter engine draws its first frame -->
-        <item name="android:windowBackground">@drawable/launch_background</item>
-    </style>
-    <!-- Theme applied to the Android Window as soon as the process has started.
-         This theme determines the color of the Android Window while your
-         Flutter UI initializes, as well as behind your Flutter UI while its
-         running.
+package io.flutter.plugins;
 
-         This Theme is only used starting with V2 of Flutter's Android embedding. -->
-    <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
-        <item name="android:windowBackground">?android:colorBackground</item>
-    </style>
-</resources>
+import androidx.annotation.Keep;
+import androidx.annotation.NonNull;
+import io.flutter.Log;
 
+import io.flutter.embedding.engine.FlutterEngine;
 
-============================================================
-FILE: android/app/src/main/res/drawable-v21/launch_background.xml
-============================================================
-
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Modify this file to customize your launch splash screen -->
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="?android:colorBackground" />
-
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@mipmap/launch_image" />
-    </item> -->
-</layer-list>
-
-
-============================================================
-FILE: android/app/src/main/res/drawable/launch_background.xml
-============================================================
-
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Modify this file to customize your launch splash screen -->
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@android:color/white" />
-
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@mipmap/launch_image" />
-    </item> -->
-</layer-list>
-
-
-============================================================
-FILE: android/app/src/main/res/values-night/styles.xml
-============================================================
-
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Theme applied to the Android Window while the process is starting when the OS's Dark Mode setting is on -->
-    <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
-        <!-- Show a splash screen on the activity. Automatically removed when
-             the Flutter engine draws its first frame -->
-        <item name="android:windowBackground">@drawable/launch_background</item>
-    </style>
-    <!-- Theme applied to the Android Window as soon as the process has started.
-         This theme determines the color of the Android Window while your
-         Flutter UI initializes, as well as behind your Flutter UI while its
-         running.
-
-         This Theme is only used starting with V2 of Flutter's Android embedding. -->
-    <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
-        <item name="android:windowBackground">?android:colorBackground</item>
-    </style>
-</resources>
+/**
+ * Generated file. Do not edit.
+ * This file is generated by the Flutter tool based on the
+ * plugins that support the Android platform.
+ */
+@Keep
+public final class GeneratedPluginRegistrant {
+  private static final String TAG = "GeneratedPluginRegistrant";
+  public static void registerWith(@NonNull FlutterEngine flutterEngine) {
+    try {
+      flutterEngine.getPlugins().add(new com.llfbandit.app_links.AppLinksPlugin());
+    } catch (Exception e) {
+      Log.e(TAG, "Error registering plugin app_links, com.llfbandit.app_links.AppLinksPlugin", e);
+    }
+    try {
+      flutterEngine.getPlugins().add(new dev.fluttercommunity.plus.connectivity.ConnectivityPlugin());
+    } catch (Exception e) {
+      Log.e(TAG, "Error registering plugin connectivity_plus, dev.fluttercommunity.plus.connectivity.ConnectivityPlugin", e);
+    }
+    try {
+      flutterEngine.getPlugins().add(new io.flutter.plugins.googlesignin.GoogleSignInPlugin());
+    } catch (Exception e) {
+      Log.e(TAG, "Error registering plugin google_sign_in_android, io.flutter.plugins.googlesignin.GoogleSignInPlugin", e);
+    }
+    try {
+      flutterEngine.getPlugins().add(new com.github.dart_lang.jni.JniPlugin());
+    } catch (Exception e) {
+      Log.e(TAG, "Error registering plugin jni, com.github.dart_lang.jni.JniPlugin", e);
+    }
+    try {
+      flutterEngine.getPlugins().add(new com.github.dart_lang.jni_flutter.JniFlutterPlugin());
+    } catch (Exception e) {
+      Log.e(TAG, "Error registering plugin jni_flutter, com.github.dart_lang.jni_flutter.JniFlutterPlugin", e);
+    }
+    try {
+      flutterEngine.getPlugins().add(new com.baseflow.permissionhandler.PermissionHandlerPlugin());
+    } catch (Exception e) {
+      Log.e(TAG, "Error registering plugin permission_handler_android, com.baseflow.permissionhandler.PermissionHandlerPlugin", e);
+    }
+    try {
+      flutterEngine.getPlugins().add(new com.fluttercandies.photo_manager.PhotoManagerPlugin());
+    } catch (Exception e) {
+      Log.e(TAG, "Error registering plugin photo_manager, com.fluttercandies.photo_manager.PhotoManagerPlugin", e);
+    }
+    try {
+      flutterEngine.getPlugins().add(new io.flutter.plugins.sharedpreferences.SharedPreferencesPlugin());
+    } catch (Exception e) {
+      Log.e(TAG, "Error registering plugin shared_preferences_android, io.flutter.plugins.sharedpreferences.SharedPreferencesPlugin", e);
+    }
+    try {
+      flutterEngine.getPlugins().add(new com.tekartik.sqflite.SqflitePlugin());
+    } catch (Exception e) {
+      Log.e(TAG, "Error registering plugin sqflite_android, com.tekartik.sqflite.SqflitePlugin", e);
+    }
+    try {
+      flutterEngine.getPlugins().add(new io.flutter.plugins.urllauncher.UrlLauncherPlugin());
+    } catch (Exception e) {
+      Log.e(TAG, "Error registering plugin url_launcher_android, io.flutter.plugins.urllauncher.UrlLauncherPlugin", e);
+    }
+  }
+}
 
 
 ============================================================
@@ -3831,6 +4092,7 @@ dependencies:
   url_launcher: ^6.3.3
   google_sign_in: ^7.2.0
   shared_preferences: ^2.5.6
+  cached_network_image: ^4.0.5
 
 dev_dependencies:
   flutter_test:
@@ -3952,6 +4214,68 @@ flutter {
 
 
 ============================================================
+FILE: android/build.gradle.kts
+============================================================
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+val newBuildDir: Directory =
+    rootProject.layout.buildDirectory
+        .dir("../../build")
+        .get()
+rootProject.layout.buildDirectory.value(newBuildDir)
+
+subprojects {
+    val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
+    project.layout.buildDirectory.value(newSubprojectBuildDir)
+}
+subprojects {
+    project.evaluationDependsOn(":app")
+}
+
+tasks.register<Delete>("clean") {
+    delete(rootProject.layout.buildDirectory)
+}
+
+
+============================================================
+FILE: android/settings.gradle.kts
+============================================================
+
+pluginManagement {
+    val flutterSdkPath =
+        run {
+            val properties = java.util.Properties()
+            file("local.properties").inputStream().use { properties.load(it) }
+            val flutterSdkPath = properties.getProperty("flutter.sdk")
+            require(flutterSdkPath != null) { "flutter.sdk not set in local.properties" }
+            flutterSdkPath
+        }
+
+    includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
+
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    id("dev.flutter.flutter-plugin-loader") version "1.0.0"
+    id("com.android.application") version "9.1.0" apply false
+    id("org.jetbrains.kotlin.android") version "2.4.0" apply false
+}
+
+include(":app")
+
+
+============================================================
 FILE: android/app/src/main/AndroidManifest.xml
 ============================================================
 
@@ -4026,97 +4350,3 @@ FILE: android/app/proguard-rules.pro
 
 # Ignore missing Google Play Core classes (Fix for R8)
 -dontwarn com.google.android.play.core.**
-
-
-============================================================
-FILE: .github/workflows/build-dinor.yml
-============================================================
-
-name: Build Dinor APK
-
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-          cache: true
-
-      - name: Print Flutter version
-        run: flutter --version
-
-      - name: Setup Permanent Debug Keystore
-        run: |
-          mkdir -p ~/.android
-          echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | tr -d ' \n\r' | base64 -d > ~/.android/debug.keystore
-          chmod 600 ~/.android/debug.keystore
-          echo "Keystore file size:"
-          ls -la ~/.android/debug.keystore
-
-      - name: Get Debug SHA-1
-        run: |
-          keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android | grep SHA1
-
-      - name: Cache pub packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.pub-cache
-            .dart_tool
-          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
-          restore-keys: |
-            pub-${{ runner.os }}-
-
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: |
-            gradle-${{ runner.os }}-
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Build arm64 release APK
-        run: |
-          flutter build apk \
-            --release \
-            --target-platform android-arm64 \
-            --split-per-abi \
-            --obfuscate \
-            --split-debug-info=build/debug-info
-
-      - name: List output sizes
-        run: ls -lh build/app/outputs/flutter-apk/
-
-      - name: Upload arm64 APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: dinor-apk-arm64
-          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-          if-no-files-found: error
-
-      - name: Upload debug symbols
-        uses: actions/upload-artifact@v4
-        with:
-          name: dinor-debug-info
-          path: build/debug-info
-          if-no-files-found: warn

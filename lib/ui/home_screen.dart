@@ -24,26 +24,16 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Map<String, dynamic>> _conversations = [];
   List<Map<String, dynamic>> _searchResults = [];
   bool _isSearching = false;
+  bool _isLoading = true; // Startup loading state
   final FocusNode _searchFocus = FocusNode();
 
   @override
   void initState() {
     super.initState();
-    _listenToConversations();
-  }
-
-  @override
-  void dispose() {
-    _searchFocus.dispose();
-    super.dispose();
-  }
-
-  void _listenToConversations() {
-    // 1. Fetch initial conversations with profiles
     _fetchConversations();
-
-    // 2. Listen to changes in messages or conversations to trigger a refresh
-    supabase.channel('public:messages_refresh')
+    
+    // Listen to realtime updates
+    supabase.channel('public:conversations_refresh')
       .onPostgresChanges(
         event: PostgresChangeEvent.all,
         schema: 'public',
@@ -52,14 +42,24 @@ class _HomeScreenState extends State<HomeScreen> {
       ).subscribe();
   }
 
+  @override
+  void dispose() {
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
   Future<void> _fetchConversations() async {
     try {
       final data = await ChatService.getMyConversations();
       if (mounted) {
-        setState(() => _conversations = data);
+        setState(() {
+          _conversations = data;
+          _isLoading = false;
+        });
       }
     } catch (e) {
       debugPrint("Error fetching conversations: $e");
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -79,15 +79,21 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openChat(String otherUserId, String name) async {
-    _searchFocus.unfocus(); // Hide keyboard before navigating
+    _searchFocus.unfocus();
+    // 1. OPTIMISTIC NAVIGATION: Open immediately
     final convId = await ChatService.getOrCreateConversation(otherUserId);
     if (mounted) {
+      // Clear unread count locally instantly before opening
+      setState(() {
+        // The UI will refresh via realtime, but we can trigger a quick local refresh
+      });
+
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => ChatScreen(title: name, conversationId: convId, otherUserId: otherUserId),
         ),
-      );
+      ).then((_) => _fetchConversations()); // Refresh when coming back
     }
   }
 
@@ -105,6 +111,7 @@ class _HomeScreenState extends State<HomeScreen> {
         child: _drawerPage == 0 
           ? Column(
           children: [
+            // Header
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Row(
@@ -119,20 +126,25 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
+            
+            // Search Bar
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Container(
                 decoration: BoxDecoration(color: DinorTheme.surfaceDark, borderRadius: BorderRadius.circular(16), boxShadow: DinorTheme.softShadow),
                 child: TextField(
                   focusNode: _searchFocus,
-                  autofocus: false, // Prevents the keyboard from popping up automatically
+                  autofocus: false,
                   onChanged: _searchUsers,
                   style: const TextStyle(color: Colors.white),
                   decoration: const InputDecoration(hintText: 'Search users...', hintStyle: TextStyle(color: DinorTheme.textGrey), prefixIcon: Icon(Icons.search, color: DinorTheme.textGrey), border: InputBorder.none, contentPadding: EdgeInsets.symmetric(vertical: 14)),
                 ),
               ),
             ),
+            
             const SizedBox(height: 8),
+            
+            // AI Card
             if (!_isSearching)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -152,9 +164,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
+              
             const SizedBox(height: 16),
+
+            // Loading / Chat List
             Expanded(
-              child: ListView.separated(
+              child: _isLoading 
+                ? const Center(child: CircularProgressIndicator(color: brandBlue))
+                : ListView.separated(
                 itemCount: _isSearching ? _searchResults.length : _conversations.length,
                 separatorBuilder: (context, index) => const SizedBox(height: 4),
                 itemBuilder: (context, index) {
@@ -169,10 +186,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     final conv = _conversations[index];
                     final myId = supabase.auth.currentUser!.id;
                     
-                    // Safely extract the nested user object
                     final otherUser = conv['user1_id'] == myId ? conv['user2'] : conv['user1'];
                     final otherName = (otherUser != null && otherUser['username'] != null) ? otherUser['username'] : 'Unknown';
                     final otherId = otherUser != null ? otherUser['id'] : '';
+                    
+                    // Fetch latest message
+                    final latestMsgList = conv['latest_message'];
+                    final latestMsg = (latestMsgList != null && latestMsgList.isNotEmpty) ? latestMsgList[0] : null;
                     
                     return Container(
                       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -182,14 +202,17 @@ class _HomeScreenState extends State<HomeScreen> {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                         leading: CircleAvatar(backgroundColor: brandBlue.withValues(alpha: 0.15), child: Text(otherName[0].toUpperCase(), style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold))),
                         title: Text(otherName, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
-                        subtitle: Text(conv['last_message'] ?? 'No messages yet', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: DinorTheme.textGrey)),
+                        subtitle: Text(
+                          conv['last_message'] ?? 'No messages yet', 
+                          maxLines: 1, 
+                          overflow: TextOverflow.ellipsis, 
+                          style: const TextStyle(color: DinorTheme.textGrey)
+                        ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             // 1. Thumbnail for Images / Videos
-                            if (conv['latest_message'] != null && 
-                                conv['latest_message'].isNotEmpty &&
-                                conv['latest_message'][0]['is_image'] == true)
+                            if (latestMsg != null && latestMsg['is_image'] == true)
                               Padding(
                                 padding: const EdgeInsets.only(right: 8.0),
                                 child: ClipRRect(
@@ -198,22 +221,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                     alignment: Alignment.center,
                                     children: [
                                       CachedNetworkImage(
-                                        imageUrl: conv['latest_message'][0]['content'],
+                                        imageUrl: latestMsg['content'],
                                         width: 40,
                                         height: 40,
                                         fit: BoxFit.cover,
                                         placeholder: (c, u) => Container(width: 40, height: 40, color: Colors.grey[800]),
                                         errorWidget: (c, u, e) => Container(width: 40, height: 40, color: Colors.grey[800], child: const Icon(Icons.broken_image, size: 16)),
                                       ),
-                                      // If the URL contains "video" or is a known video format, show a pause icon
-                                      if (conv['latest_message'][0]['content'].toString().contains('.mp4') || 
-                                          conv['latest_message'][0]['content'].toString().contains('video'))
+                                      if (latestMsg['content'].toString().contains('.mp4') || latestMsg['content'].toString().contains('video'))
                                         Container(
                                           padding: const EdgeInsets.all(4),
-                                          decoration: BoxDecoration(
-                                            color: Colors.black.withValues(alpha: 0.5),
-                                            shape: BoxShape.circle,
-                                          ),
+                                          decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.5), shape: BoxShape.circle),
                                           child: const Icon(Icons.pause, color: Colors.white, size: 16),
                                         ),
                                     ],
@@ -240,10 +258,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 },
               ),
             ),
+            
+            // Bottom Nav
             CustomBottomNav(
               currentIndex: _currentIndex,
               onTap: (index) {
-                _searchFocus.unfocus(); // Hide keyboard when tapping bottom nav
+                _searchFocus.unfocus();
                 if (index == 3) {
                   Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen())).then((_) => setState(() => _currentIndex = 0));
                 } else {

@@ -3,7 +3,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class ChatService {
   static final supabase = Supabase.instance.client;
 
-  // 1. Search for real users
   static Future<List<Map<String, dynamic>>> searchUsers(String query) async {
     final response = await supabase
         .from('profiles')
@@ -14,32 +13,31 @@ class ChatService {
     return List<Map<String, dynamic>>.from(response);
   }
 
-  // 2. Create or get a conversation
   static Future<String> getOrCreateConversation(String otherUserId) async {
     final myId = supabase.auth.currentUser!.id;
     
+    // 1. Try to get existing conversation fast
     final existing = await supabase
         .from('conversations')
-        .select()
+        .select('id')
         .or('and(user1_id.eq.$myId,user2_id.eq.$otherUserId),and(user1_id.eq.$otherUserId,user2_id.eq.$myId)')
         .maybeSingle();
 
     if (existing != null) return existing['id'];
 
+    // 2. Create new conversation
     final newConv = await supabase
         .from('conversations')
         .insert({'user1_id': myId, 'user2_id': otherUserId})
-        .select()
+        .select('id')
         .single();
 
     return newConv['id'];
   }
 
-  // 3. Fetch conversations with joined usernames
   static Future<List<Map<String, dynamic>>> getMyConversations() async {
     final myId = supabase.auth.currentUser!.id;
     
-    // Fetch the conversation AND the latest message for the thumbnail
     final response = await supabase
         .from('conversations')
         .select('''
@@ -54,17 +52,6 @@ class ChatService {
     return List<Map<String, dynamic>>.from(response);
   }
 
-  // 4. Fetch messages for a conversation
-  static Future<List<Map<String, dynamic>>> getMessages(String conversationId) async {
-    final response = await supabase
-        .from('messages')
-        .select()
-        .eq('conversation_id', conversationId)
-        .order('created_at', ascending: true);
-    return List<Map<String, dynamic>>.from(response);
-  }
-
-  // 5. Mark messages as read
   static Future<void> markAsRead(String conversationId) async {
     await supabase
         .from('messages')
@@ -74,7 +61,6 @@ class ChatService {
         .eq('is_read', false);
   }
 
-  // 6. Get unread count
   static Future<int> getUnreadCount(String conversationId) async {
     final response = await supabase
         .from('messages')
