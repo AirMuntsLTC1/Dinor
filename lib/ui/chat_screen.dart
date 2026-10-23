@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:math';
 import '../ffi/dinor_bindings.dart';
 import '../chat/ai_service.dart';
+import 'ai_avatar.dart';
 
 class Message {
   final String text;
@@ -131,7 +132,15 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: AppBar(
         backgroundColor: brandBlue,
         foregroundColor: Colors.white,
-        title: Text(widget.title),
+        title: Row(
+          children: [
+            if (widget.isAi) ...[
+              AnimatedAIAvatar(size: 32, isThinking: _isAiTyping),
+              const SizedBox(width: 12),
+            ],
+            Text(widget.title),
+          ],
+        ),
       ),
       body: Column(
         children: [
@@ -152,9 +161,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 }
 
                 final msg = _messages[index];
-                return Align(
-                  alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Container(
+                
+                Widget messageBubble = Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     decoration: BoxDecoration(
@@ -180,7 +188,25 @@ class _ChatScreenState extends State<ChatScreen> {
                         fontSize: 16,
                       ),
                     ),
-                  ),
+                  );
+
+                // Wrap AI messages with the avatar
+                if (!msg.isMe && widget.isAi) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4, right: 8),
+                        child: AnimatedAIAvatar(size: 28),
+                      ),
+                      Flexible(child: messageBubble),
+                    ],
+                  );
+                }
+
+                return Align(
+                  alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
+                  child: messageBubble,
                 );
               },
             ),

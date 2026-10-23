@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../ffi/dinor_bindings.dart';
 import 'chat_screen.dart';
+import 'ai_avatar.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -123,10 +124,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   child: Row(
                     children: [
-                      const CircleAvatar(
-                        backgroundColor: Colors.white,
-                        child: Icon(Icons.smart_toy, color: Color(0xFF229ED9)),
-                      ),
+                      const AnimatedAIAvatar(size: 48),
                       const SizedBox(width: 16),
                       const Expanded(
                         child: Column(
