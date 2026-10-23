@@ -38,14 +38,28 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _listenToConversations() {
-    supabase.from('conversations').stream(primaryKey: ['id']).listen((data) {
+    // 1. Fetch initial conversations with profiles
+    _fetchConversations();
+
+    // 2. Listen to changes in messages or conversations to trigger a refresh
+    supabase.channel('public:messages_refresh')
+      .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'conversations',
+        callback: (payload) => _fetchConversations(),
+      ).subscribe();
+  }
+
+  Future<void> _fetchConversations() async {
+    try {
+      final data = await ChatService.getMyConversations();
       if (mounted) {
-        setState(() {
-          final myId = supabase.auth.currentUser!.id;
-          _conversations = data.where((c) => c['user1_id'] == myId || c['user2_id'] == myId).toList();
-        });
+        setState(() => _conversations = data);
       }
-    });
+    } catch (e) {
+      debugPrint("Error fetching conversations: $e");
+    }
   }
 
   Future<void> _searchUsers(String query) async {
@@ -153,8 +167,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   } else {
                     final conv = _conversations[index];
                     final myId = supabase.auth.currentUser!.id;
+                    
+                    // Safely extract the nested user object
                     final otherUser = conv['user1_id'] == myId ? conv['user2'] : conv['user1'];
-                    final otherName = otherUser?['username'] ?? 'Unknown';
+                    final otherName = (otherUser != null && otherUser['username'] != null) ? otherUser['username'] : 'Unknown';
+                    final otherId = otherUser != null ? otherUser['id'] : '';
                     
                     return Container(
                       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -174,7 +191,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             return const SizedBox.shrink();
                           },
                         ),
-                        onTap: () => _openChat(otherUser['id'], otherName),
+                        onTap: () => _openChat(otherId, otherName),
                       ),
                     );
                   }
