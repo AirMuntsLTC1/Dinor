@@ -6,3 +6,6 @@
 -keepclasseswithmembernames class * {
     native <methods>;
 }
+
+# Keep Dinor's native FFI bridge
+-keep class com.dinor.dinor.** { *; }
