@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../ffi/dinor_bindings.dart';
 import 'chat_screen.dart';
 import 'ai_avatar.dart';
+import 'bottom_nav.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -12,6 +13,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   String _nativeStatus = 'Checking core...';
+  int _currentIndex = 0; // 0 = Chats, 1 = Friends, 2 = Settings, 3 = Profile
 
   final List<Map<String, String>> _chats = [
     {'name': 'Alice', 'msg': 'Hey, are we still on for tomorrow?', 'time': '10:45 AM'},
@@ -182,23 +184,28 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             
-            // 5. Native Core Status Footer
+            // 5. Floating Bottom Navigation Bar
+            CustomBottomNav(
+              currentIndex: _currentIndex,
+              onTap: (index) {
+                setState(() => _currentIndex = index);
+                // TODO: Change the body content based on the tab
+              },
+            ),
+
+            // 6. Native Core Status Footer
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.symmetric(vertical: 4),
               color: Colors.black12,
               child: Text(
                 'Native Core: $_nativeStatus',
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12, color: Colors.black54),
+                style: const TextStyle(fontSize: 10, color: Colors.black54),
               ),
             ),
           ],
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {},
-        child: const Icon(Icons.chat),
       ),
     );
   }
