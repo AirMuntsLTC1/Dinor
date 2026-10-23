@@ -339,27 +339,33 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _buildAlbumGrid(List<Message> images, bool isMe) {
     int count = images.length;
     int displayCount = count > 4 ? 3 : count;
+    // Telegram uses a very tight 2px gap
+    const double gap = 2.0;
+    const double totalSize = 260.0;
 
     if (displayCount == 1) {
       return _buildSingleImage(images[0]);
     } else if (displayCount == 2) {
       return Row(
         children: [
-          Expanded(child: _buildGridImage(images[0], 130, 200)),
-          Expanded(child: _buildGridImage(images[1], 130, 200)),
+          Expanded(child: _buildGridImage(images[0])),
+          const SizedBox(width: gap),
+          Expanded(child: _buildGridImage(images[1])),
         ],
       );
     } else if (displayCount == 3) {
       return SizedBox(
-        height: 200,
+        height: totalSize,
         child: Row(
           children: [
-            Expanded(child: _buildGridImage(images[0], 130, 200)),
+            Expanded(child: _buildGridImage(images[0])),
+            const SizedBox(width: gap),
             Expanded(
               child: Column(
                 children: [
-                  Expanded(child: _buildGridImage(images[1], 130, 100)),
-                  Expanded(child: _buildGridImage(images[2], 130, 100)),
+                  Expanded(child: _buildGridImage(images[1])),
+                  const SizedBox(height: gap),
+                  Expanded(child: _buildGridImage(images[2])),
                 ],
               ),
             ),
@@ -368,26 +374,29 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     } else {
       return SizedBox(
-        height: 200,
+        height: totalSize,
         child: Column(
           children: [
             Expanded(
               child: Row(
                 children: [
-                  Expanded(child: _buildGridImage(images[0], 130, 100)),
-                  Expanded(child: _buildGridImage(images[1], 130, 100)),
+                  Expanded(child: _buildGridImage(images[0])),
+                  const SizedBox(width: gap),
+                  Expanded(child: _buildGridImage(images[1])),
                 ],
               ),
             ),
+            const SizedBox(height: gap),
             Expanded(
               child: Row(
                 children: [
-                  Expanded(child: _buildGridImage(images[2], 130, 100)),
+                  Expanded(child: _buildGridImage(images[2])),
+                  const SizedBox(width: gap),
                   Expanded(
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        _buildGridImage(images[3], 130, 100),
+                        _buildGridImage(images[3]),
                         if (count > 4)
                           Container(
                             color: Colors.black.withValues(alpha: 0.5),
@@ -413,16 +422,14 @@ class _ChatScreenState extends State<ChatScreen> {
       child: CachedNetworkImage(
         imageUrl: img.text,
         fit: BoxFit.cover,
-        placeholder: (c, u) => Container(color: Colors.grey[800], height: 200),
-        errorWidget: (c, u, e) => Container(color: Colors.grey[800], height: 200, child: const Icon(Icons.broken_image)),
+        placeholder: (c, u) => Container(color: Colors.grey[800], height: 260, child: const Center(child: CircularProgressIndicator())),
+        errorWidget: (c, u, e) => Container(color: Colors.grey[800], height: 260, child: const Icon(Icons.broken_image)),
       ),
     );
   }
 
-  Widget _buildGridImage(Message img, double width, double height) {
-    return SizedBox(
-      width: width,
-      height: height,
+  Widget _buildGridImage(Message img) {
+    return SizedBox.expand(
       child: CachedNetworkImage(
         imageUrl: img.text,
         fit: BoxFit.cover,
@@ -679,9 +686,10 @@ class _ChatScreenState extends State<ChatScreen> {
                                 final albumId = 'album_${DateTime.now().millisecondsSinceEpoch}';
 
                                 for (var asset in selectedAssets) {
-                                  final file = await asset.file;
-                                  if (file != null) {
-                                    if (widget.isAi) {
+                                  // 1. Instantly show the local image and "sending" animation
+                                  if (widget.isAi) {
+                                    final file = await asset.file;
+                                    if (file != null) {
                                       final bytes = await file.readAsBytes();
                                       final base64String = base64Encode(bytes);
                                       setState(() {
@@ -689,35 +697,51 @@ class _ChatScreenState extends State<ChatScreen> {
                                       });
                                       _scrollToBottom();
                                       _triggerAiResponse(caption.isNotEmpty ? caption : "Examine this image.", imageBase64: base64String);
-                                    } else if (_currentUserId != null) {
-                                      int cppTime = 0;
-                                      try { cppTime = DinorCore.load().getFastTimestamp(); } catch (_) {}
-                                      final tempId = 'temp_$cppTime';
+                                    }
+                                  } else if (_currentUserId != null) {
+                                    int cppTime = 0;
+                                    try { cppTime = DinorCore.load().getFastTimestamp(); } catch (_) {}
+                                    final tempId = 'temp_$cppTime';
+                                    
+                                    // Get file path for instant local display
+                                    final file = await asset.file;
+                                    if (file != null) {
+                                      // Show instantly on screen with SENDING dots
                                       setState(() => _messages.add(Message(tempId, file.path, true, isImage: true, caption: caption.isNotEmpty ? caption : null, status: MessageStatus.sending, albumId: albumId)));
                                       _scrollToBottom();
 
-                                      final fileName = '${DateTime.now().millisecondsSinceEpoch}_$_currentUserId.jpg';
-                                      await supabase.storage.from('chat_media').upload(fileName, file);
-                                      final publicUrl = supabase.storage.from('chat_media').getPublicUrl(fileName);
+                                      // Upload to Supabase in the background
+                                      try {
+                                        final fileName = '${DateTime.now().millisecondsSinceEpoch}_$_currentUserId.jpg';
+                                        await supabase.storage.from('chat_media').upload(fileName, file);
+                                        final publicUrl = supabase.storage.from('chat_media').getPublicUrl(fileName);
 
-                                      final response = await supabase.from('messages').insert({
-                                        'sender_id': _currentUserId,
-                                        'content': publicUrl,
-                                        'is_image': true,
-                                        'conversation_id': widget.conversationId,
-                                        'is_read': false,
-                                        'album_id': albumId,
-                                      }).select('id').single();
+                                        final response = await supabase.from('messages').insert({
+                                          'sender_id': _currentUserId,
+                                          'content': publicUrl,
+                                          'is_image': true,
+                                          'conversation_id': widget.conversationId,
+                                          'is_read': false,
+                                          'album_id': albumId,
+                                        }).select('id').single();
 
-                                      setState(() {
-                                        final index = _messages.indexWhere((m) => m.id == tempId);
-                                        if (index != -1) _messages[index] = Message(response['id'].toString(), publicUrl, true, isImage: true, caption: caption.isNotEmpty ? caption : null, status: MessageStatus.sent, albumId: albumId);
-                                      });
+                                        // Turn the "sending" dots into a "sent" checkmark
+                                        setState(() {
+                                          final index = _messages.indexWhere((m) => m.id == tempId);
+                                          if (index != -1) _messages[index] = Message(response['id'].toString(), publicUrl, true, isImage: true, caption: caption.isNotEmpty ? caption : null, status: MessageStatus.sent, albumId: albumId);
+                                        });
 
-                                      await supabase.from('conversations').update({
-                                        'last_message': '📷 Photo',
-                                        'last_message_time': DateTime.now().toUtc().toIso8601String(),
-                                      }).eq('id', widget.conversationId!);
+                                        await supabase.from('conversations').update({
+                                          'last_message': '📷 Photo',
+                                          'last_message_time': DateTime.now().toUtc().toIso8601String(),
+                                        }).eq('id', widget.conversationId!);
+                                      } catch (e) {
+                                        // If upload fails, mark as failed
+                                        setState(() {
+                                          final index = _messages.indexWhere((m) => m.id == tempId);
+                                          if (index != -1) _messages[index] = Message(tempId, file.path, true, isImage: true, status: MessageStatus.failed, albumId: albumId);
+                                        });
+                                      }
                                     }
                                   }
                                 }
