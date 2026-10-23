@@ -6,7 +6,7 @@ class DinorAI {
     final msg = userMessage.toLowerCase().trim();
 
     if (msg == 'hi' || msg == 'hello' || msg == 'hey') {
-      return "Hello! I am Dinor AI. I am connected to the live web. What do you want to search?";
+      return "Hello! I am Dinor AI. I have live access to the web. What do you want to know?";
     }
 
     final connectivityResult = await Connectivity().checkConnectivity();
@@ -14,21 +14,32 @@ class DinorAI {
       return "I am currently offline. Please check your internet connection.";
     }
 
-    try {
-      final supabase = Supabase.instance.client;
-      final response = await supabase.functions.invoke(
-        'chat-ai',
-        body: {'userMessage': userMessage},
-      );
+    final supabase = Supabase.instance.client;
 
-      if (response.status == 200 && response.data['reply'] != null) {
-        return response.data['reply'];
-      } else {
-        final errorMsg = response.data != null ? response.data.toString() : "Unknown error";
-        return "Error: $errorMsg (Status ${response.status})";
+    // Try up to 2 times to get a valid response
+    for (int attempt = 1; attempt <= 2; attempt++) {
+      try {
+        final response = await supabase.functions.invoke(
+          'chat-ai',
+          body: {'userMessage': userMessage},
+        );
+
+        if (response.status == 200 && response.data != null) {
+          final reply = response.data['reply'];
+          if (reply != null && reply is String && reply.trim().isNotEmpty) {
+            return reply;
+          }
+        }
+        // If we got here, the response was invalid. Try again.
+      } catch (e) {
+        if (attempt == 2) {
+          return "I lost connection while searching the web. Please try again.";
+        }
+        // Wait 1 second before retrying
+        await Future.delayed(const Duration(seconds: 1));
       }
-    } catch (e) {
-      return "Oops, I lost my connection. Error: $e";
     }
+
+    return "I couldn't reach the web right now. Please try again.";
   }
 }
