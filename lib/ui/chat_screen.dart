@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:math';
+import '../ffi/dinor_bindings.dart';
 
 class Message {
   final String text;
@@ -33,8 +34,11 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _sendMessage() {
-    final text = _textController.text.trim();
-    if (text.isEmpty) return;
+    final rawText = _textController.text.trim();
+    if (rawText.isEmpty) return;
+    
+    // Use C++ core to format the text
+    final text = DinorCore.load().formatMessage(rawText);
 
     // 1. Get the position of the input field for the flying animation
     final RenderBox? inputBox = _inputKey.currentContext?.findRenderObject() as RenderBox?;
