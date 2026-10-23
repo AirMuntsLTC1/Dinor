@@ -16,7 +16,7 @@ class CustomBottomNav extends StatelessWidget {
     const Color brandBlue = Color(0xFF229ED9);
 
     return Container(
-      margin: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+      margin: const EdgeInsets.only(left: 32, right: 32, bottom: 12),
       decoration: BoxDecoration(
         color: DinorTheme.surfaceDark,
         borderRadius: BorderRadius.circular(30),
@@ -30,9 +30,9 @@ class CustomBottomNav extends StatelessWidget {
             indicatorColor: brandBlue.withValues(alpha: 0.15),
             labelTextStyle: WidgetStateProperty.resolveWith((states) {
               if (states.contains(WidgetState.selected)) {
-                return const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: brandBlue);
+                return const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: brandBlue);
               }
-              return const TextStyle(fontSize: 12, color: DinorTheme.textGrey);
+              return const TextStyle(fontSize: 10, color: DinorTheme.textGrey);
             }),
             iconTheme: WidgetStateProperty.resolveWith((states) {
               if (states.contains(WidgetState.selected)) {
@@ -42,7 +42,7 @@ class CustomBottomNav extends StatelessWidget {
             }),
           ),
           child: NavigationBar(
-            height: 65,
+            height: 55,
             elevation: 0,
             selectedIndex: currentIndex,
             onDestinationSelected: onTap,
@@ -69,8 +69,8 @@ class CustomBottomNav extends StatelessWidget {
               // 4. Profile Picture Placeholder
               NavigationDestination(
                 icon: Container(
-                  width: 28,
-                  height: 28,
+                  width: 24,
+                  height: 24,
                   decoration: BoxDecoration(
                     color: DinorTheme.bgDark,
                     shape: BoxShape.circle,
@@ -81,7 +81,7 @@ class CustomBottomNav extends StatelessWidget {
                   ),
                   child: Icon(
                     Icons.person,
-                    size: 18,
+                    size: 16,
                     color: currentIndex == 3 ? brandBlue : DinorTheme.textGrey,
                   ),
                 ),

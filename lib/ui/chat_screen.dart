@@ -426,8 +426,10 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            color: DinorTheme.surfaceDark,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: const BoxDecoration(
+              color: Colors.transparent, // Removed the solid header background
+            ),
             child: SafeArea(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
