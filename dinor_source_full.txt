@@ -6,7 +6,7 @@ FILE: lib/main.dart
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'ui/home_screen.dart';
+import 'ui/login_screen.dart';
 import 'ui/dinor_theme.dart';
 import 'ui/internet_banner.dart';
 
@@ -61,7 +61,7 @@ class DinorApp extends StatelessWidget {
           foregroundColor: Colors.white,
         ),
       ),
-        home: const HomeScreen(),
+        home: const LoginScreen(),
       ),
     );
   }
@@ -489,9 +489,15 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _initSupabaseChat() async {
-    if (supabase.auth.currentUser == null) {
-      await supabase.auth.signInAnonymously();
+    // Automatically sign in anonymously so we have a user ID for the database
+    if (supabase.auth.currentSession == null) {
+      try {
+        await supabase.auth.signInAnonymously();
+      } catch (e) {
+        debugPrint("Anonymous auth failed: $e");
+      }
     }
+    
     _currentUserId = supabase.auth.currentUser?.id;
     _fetchMessages();
 
@@ -1888,79 +1894,94 @@ class CustomBottomNav extends StatelessWidget {
     const Color brandBlue = Color(0xFF229ED9);
 
     return Container(
-      margin: const EdgeInsets.only(left: 32, right: 32, bottom: 12),
+      // Smaller margins to make the whole bar more compact
+      margin: const EdgeInsets.only(left: 24, right: 24, bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
         color: DinorTheme.surfaceDark,
         borderRadius: BorderRadius.circular(30),
         boxShadow: DinorTheme.softShadow,
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(30),
-        child: NavigationBarTheme(
-          data: NavigationBarThemeData(
-            backgroundColor: Colors.white,
-            indicatorColor: brandBlue.withValues(alpha: 0.15),
-            labelTextStyle: WidgetStateProperty.resolveWith((states) {
-              if (states.contains(WidgetState.selected)) {
-                return const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: brandBlue);
-              }
-              return const TextStyle(fontSize: 10, color: DinorTheme.textGrey);
-            }),
-            iconTheme: WidgetStateProperty.resolveWith((states) {
-              if (states.contains(WidgetState.selected)) {
-                return const IconThemeData(color: brandBlue);
-              }
-              return const IconThemeData(color: DinorTheme.textGrey);
-            }),
-          ),
-          child: NavigationBar(
-            height: 55,
-            elevation: 0,
-            selectedIndex: currentIndex,
-            onDestinationSelected: onTap,
-            labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-            destinations: [
-              // 1. Chats
-              const NavigationDestination(
-                icon: Icon(Icons.chat_bubble_outline),
-                selectedIcon: Icon(Icons.chat_bubble),
-                label: 'Chats',
-              ),
-              // 2. Friends
-              const NavigationDestination(
-                icon: Icon(Icons.people_outline),
-                selectedIcon: Icon(Icons.people),
-                label: 'Friends',
-              ),
-              // 3. Settings
-              const NavigationDestination(
-                icon: Icon(Icons.settings_outlined),
-                selectedIcon: Icon(Icons.settings),
-                label: 'Settings',
-              ),
-              // 4. Profile Picture Placeholder
-              NavigationDestination(
-                icon: Container(
-                  width: 24,
-                  height: 24,
-                  decoration: BoxDecoration(
-                    color: DinorTheme.bgDark,
-                    shape: BoxShape.circle,
-                    border: Border.all(
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly, // Distributes items evenly without massive gaps
+        children: [
+          _buildNavItem(0, Icons.chat_bubble, Icons.chat_bubble_outline, 'Chats'),
+          _buildNavItem(1, Icons.people, Icons.people_outline, 'Friends'),
+          _buildNavItem(2, Icons.settings, Icons.settings_outlined, 'Settings'),
+          
+          // Profile Item (Custom Circle)
+          GestureDetector(
+            onTap: () => onTap(3),
+            behavior: HitTestBehavior.opaque,
+            child: SizedBox(
+              width: 60, // Fixed width to prevent jumping
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      color: DinorTheme.bgDark,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: currentIndex == 3 ? brandBlue : DinorTheme.textGrey,
+                        width: 2,
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.person,
+                      size: 16,
                       color: currentIndex == 3 ? brandBlue : DinorTheme.textGrey,
-                      width: 2,
                     ),
                   ),
-                  child: Icon(
-                    Icons.person,
-                    size: 16,
-                    color: currentIndex == 3 ? brandBlue : DinorTheme.textGrey,
+                  const SizedBox(height: 2),
+                  Text(
+                    'Profile',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: currentIndex == 3 ? FontWeight.bold : FontWeight.normal,
+                      color: currentIndex == 3 ? brandBlue : DinorTheme.textGrey,
+                    ),
                   ),
-                ),
-                label: 'Profile',
+                ],
               ),
-            ],
+            ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNavItem(int index, IconData activeIcon, IconData inactiveIcon, String label) {
+    const Color brandBlue = Color(0xFF229ED9);
+    final isSelected = currentIndex == index;
+
+    return GestureDetector(
+      onTap: () => onTap(index),
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: 60, // Fixed width for equal spacing
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              isSelected ? activeIcon : inactiveIcon,
+              color: isSelected ? brandBlue : DinorTheme.textGrey,
+              size: 24,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                color: isSelected ? brandBlue : DinorTheme.textGrey,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -2229,8 +2250,9 @@ FILE: lib/ui/login_screen.dart
 ============================================================
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
+
 import 'home_screen.dart';
 import 'dinor_theme.dart';
 
@@ -2243,241 +2265,307 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
-  final _otpController = TextEditingController();
-  bool _isOtpSent = false;
+  final _codeController = TextEditingController();
+  final _supabase = Supabase.instance.client;
+
   bool _isLoading = false;
+  bool _codeSent = false;
   String? _errorMessage;
+  String? _statusMessage;
 
-  final supabase = Supabase.instance.client;
+  static const Color brandBlue = Color(0xFF229ED9);
 
+  Future<void> _requestCode() async {
+    final email = _emailController.text.trim().toLowerCase();
 
-  Future<void> _loginWithGoogle() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-    
-    try {
-      // 1. Tell Supabase to open the Google Login
-      final success = await supabase.auth.signInWithOAuth(
-        OAuthProvider.google,
-        redirectTo: 'com.dinor.dinor://login-callback',
-        scopes: 'https://www.googleapis.com/auth/gmail.send', // We need this for sending emails
-      );
-
-      // 2. Once logged in, Supabase holds the Google tokens
-      if (success) {
-        // 3. We can grab the provider_token (Access Token) and refresh_token directly!
-        final session = supabase.auth.currentSession;
-        
-        if (session != null) {
-          final refreshToken = session.providerRefreshToken; // THIS IS THE TOKEN YOU NEED
-
-          debugPrint("REFRESH TOKEN: $refreshToken");
-          
-          // 4. Save it to your database so the Edge Function can use it
-          if (refreshToken != null) {
-            await supabase.from('google_tokens').upsert({
-              'id': 1,
-              'refresh_token': refreshToken,
-            });
-          }
-        }
-        
-        if (mounted) {
-          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
-        }
-      }
-    } catch (e) {
-      setState(() => _errorMessage = 'Google Login Failed: $e');
-    } finally {
-      setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _sendOtp() async {
-    final email = _emailController.text.trim();
-    if (email.isEmpty || !email.contains('@')) {
-      setState(() => _errorMessage = 'Please enter a valid email.');
+    if (email.isEmpty || !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)) {
+      setState(() {
+        _errorMessage = 'Enter a valid email address.';
+        _statusMessage = null;
+      });
       return;
     }
 
+    FocusScope.of(context).unfocus();
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _statusMessage = null;
     });
 
     try {
-      final response = await supabase.functions.invoke(
-        'auth-otp', 
-        body: {'email': email, 'action': 'send'}
-      );
-      
-      if (response.status == 200 && response.data['success'] == true) {
-        setState(() => _isOtpSent = true);
-      } else {
-        setState(() => _errorMessage = response.data['error'] ?? 'Failed to send code.');
-      }
-    } catch (e) {
-      setState(() => _errorMessage = 'Error: $e');
-    } finally {
-      setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _verifyOtp() async {
-    final email = _emailController.text.trim();
-    final otp = _otpController.text.trim();
-    if (otp.length != 6) {
-      setState(() => _errorMessage = 'Please enter the 6-digit code.');
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final response = await supabase.functions.invoke(
-        'auth-otp', 
-        body: {'email': email, 'action': 'verify', 'code': otp}
+      final response = await _supabase.functions.invoke(
+        'request-email-code',
+        body: {'email': email},
       );
 
-      if (response.status == 200 && response.data['session'] != null) {
-        final sessionData = response.data['session'];
-        
-        // Log the user in using the real session from the backend
-        await supabase.auth.setSession(
-          sessionData['access_token'],
-          sessionData['refresh_token'],
+      final data = response.data;
+      if (response.status < 200 || response.status >= 300) {
+        throw Exception(
+          data is Map && data['error'] is String
+              ? data['error']
+              : 'Could not request a code. Please try again.',
         );
-
-        if (mounted) {
-          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
-        }
-      } else {
-        setState(() => _errorMessage = response.data['error'] ?? 'Invalid code. Please try again.');
       }
+
+      if (!mounted) return;
+      setState(() {
+        _codeSent = true;
+        _statusMessage = data is Map && data['message'] is String
+            ? data['message']
+            : 'Check your email for a sign-in code.';
+      });
+    } on FunctionException catch (e) {
+      if (!mounted) return;
+      final details = e.details;
+      setState(() {
+        _errorMessage = details is Map && details['error'] is String
+            ? details['error'] as String
+            : 'Could not send the code. Check your connection and try again.';
+      });
     } catch (e) {
-      setState(() => _errorMessage = 'Error: $e');
+      if (!mounted) return;
+      setState(() => _errorMessage = e.toString().replaceFirst('Exception: ', ''));
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _verifyCode() async {
+    final email = _emailController.text.trim().toLowerCase();
+    final code = _codeController.text.trim();
+
+    if (!RegExp(r'^\d{8}$').hasMatch(code)) {
+      setState(() => _errorMessage = 'Enter the eight-digit code from your email.');
+      return;
+    }
+
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+      _statusMessage = null;
+    });
+
+    try {
+      final response = await _supabase.functions.invoke(
+        'verify-email-code',
+        body: {'email': email, 'code': code},
+      );
+
+      final data = response.data;
+      if (response.status < 200 ||
+          response.status >= 300 ||
+          data is! Map ||
+          data['refresh_token'] is! String ||
+          (data['refresh_token'] as String).isEmpty) {
+        throw Exception(
+          data is Map && data['error'] is String
+              ? data['error']
+              : 'The code is invalid or expired. Request a new code.',
+        );
+      }
+
+      // Establish a persistent, real Supabase Auth session.
+      await _supabase.auth.setSession(data['refresh_token'] as String);
+
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+        (route) => false,
+      );
+    } on FunctionException catch (e) {
+      if (!mounted) return;
+      final details = e.details;
+      setState(() {
+        _errorMessage = details is Map && details['error'] is String
+            ? details['error'] as String
+            : 'Could not verify the code. Please try again.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _errorMessage = e.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   @override
-  Widget build(BuildContext context) {
-    const Color brandBlue = Color(0xFF229ED9);
+  void dispose() {
+    _emailController.dispose();
+    _codeController.dispose();
+    super.dispose();
+  }
 
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: DinorTheme.bgDark,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Icon(Icons.chat_bubble_rounded, size: 80, color: brandBlue),
-              const SizedBox(height: 16),
-              const Text(
-                'Welcome to Dinor',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Sign in with your email to continue',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: DinorTheme.textGrey, fontSize: 16),
-              ),
-              const SizedBox(height: 48),
-
-              if (!_isOtpSent) ...[
-                // EMAIL INPUT
-                Container(
-                  decoration: BoxDecoration(
-                    color: DinorTheme.surfaceDark,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: DinorTheme.softShadow,
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.chat_bubble_rounded,
+                    size: 82,
+                    color: brandBlue,
                   ),
-                  child: TextField(
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      hintText: 'Email address',
-                      hintStyle: TextStyle(color: DinorTheme.textGrey),
-                      prefixIcon: Icon(Icons.email_outlined, color: DinorTheme.textGrey),
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton.icon(
-                  onPressed: _isLoading ? null : _loginWithGoogle,
-                  icon: const Icon(Icons.g_mobiledata, size: 32, color: Colors.white),
-                  label: _isLoading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text('Login with Google', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: brandBlue,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  ),
-                ),
-              ] else ...[
-                // OTP INPUT
-                Container(
-                  decoration: BoxDecoration(
-                    color: DinorTheme.surfaceDark,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: DinorTheme.softShadow,
-                  ),
-                  child: TextField(
-                    controller: _otpController,
-                    keyboardType: TextInputType.number,
-                    maxLength: 6,
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Dinor',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white, fontSize: 24, letterSpacing: 8, fontWeight: FontWeight.bold),
-                    decoration: const InputDecoration(
-                      hintText: '000000',
-                      hintStyle: TextStyle(color: DinorTheme.textGrey, letterSpacing: 8),
-                      border: InputBorder.none,
-                      counterText: '',
-                      contentPadding: EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 36,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: _isLoading ? null : _verifyOtp,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: brandBlue,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Sign in with your email',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: DinorTheme.textGrey,
+                      fontSize: 15,
+                    ),
                   ),
-                  child: _isLoading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text('Verify & Login', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-                ),
-                TextButton(
-                  onPressed: () => setState(() => _isOtpSent = false),
-                  child: const Text('Change Email', style: TextStyle(color: DinorTheme.textGrey)),
-                ),
-              ],
-
-              if (_errorMessage != null) ...[
-                const SizedBox(height: 16),
-                Text(
-                  _errorMessage!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ],
+                  const SizedBox(height: 32),
+                  TextField(
+                    controller: _emailController,
+                    enabled: !_isLoading && !_codeSent,
+                    keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.done,
+                    autocorrect: false,
+                    autofillHints: const [AutofillHints.email],
+                    decoration: InputDecoration(
+                      labelText: 'Email address',
+                      hintText: 'you@example.com',
+                      prefixIcon: const Icon(Icons.email_outlined),
+                      filled: true,
+                      fillColor: DinorTheme.surfaceDark,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    onSubmitted: (_) {
+                      if (!_codeSent && !_isLoading) _requestCode();
+                    },
+                  ),
+                  if (_codeSent) ...[
+                    const SizedBox(height: 18),
+                    TextField(
+                      controller: _codeController,
+                      enabled: !_isLoading,
+                      keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.done,
+                      autofillHints: const [AutofillHints.oneTimeCode],
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(8),
+                      ],
+                      decoration: InputDecoration(
+                        labelText: 'Eight-digit code',
+                        hintText: '000000',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        filled: true,
+                        fillColor: DinorTheme.surfaceDark,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      onSubmitted: (_) {
+                        if (!_isLoading) _verifyCode();
+                      },
+                    ),
+                  ],
+                  if (_statusMessage != null) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      _statusMessage!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: brandBlue, fontSize: 13),
+                    ),
+                  ],
+                  if (_errorMessage != null) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      _errorMessage!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.redAccent,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 22),
+                  SizedBox(
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: _isLoading
+                          ? null
+                          : (_codeSent ? _verifyCode : _requestCode),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: brandBlue,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Text(
+                              _codeSent ? 'Verify and sign in' : 'Send sign-in code',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                    ),
+                  ),
+                  if (_codeSent) ...[
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: _isLoading
+                          ? null
+                          : () {
+                              setState(() {
+                                _codeSent = false;
+                                _codeController.clear();
+                                _errorMessage = null;
+                                _statusMessage = null;
+                              });
+                            },
+                      child: const Text(
+                        'Use another email',
+                        style: TextStyle(color: DinorTheme.textGrey),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 28),
+                  const Text(
+                    'By continuing, you agree to Dinor’s Terms of Service and Privacy Policy.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: DinorTheme.textGrey,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -2493,59 +2581,61 @@ FILE: lib/chat/ai_service.dart
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:html/parser.dart' as parser;
-import '../ffi/dinor_bindings.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/foundation.dart';
 
 class DinorAI {
   static Future<String> getResponse(String userMessage) async {
     final msg = userMessage.toLowerCase().trim();
 
     if (msg == 'hi' || msg == 'hello' || msg == 'hey') {
-      return "Hello! I am Dinor AI. My brain runs on C++. What do you want to know?";
+      return "Hello! I am Dinor AI. I am powered by Llama 3. What do you want to know?";
     }
     if (msg.contains('your name')) {
-      return "I am Dinor AI, powered by a native C++ search engine. No external APIs!";
+      return "I am Dinor AI, running on a completely free AI engine. How can I help you today?";
     }
 
-    // Check internet before trying to search
     final connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult.contains(ConnectivityResult.none)) {
-      return "I am currently offline. Please check your internet connection to search the web!";
+      return "I am currently offline. Please check your internet connection.";
     }
 
     try {
-      // 1. Fetch web results
-      final query = Uri.encodeComponent(userMessage);
-      final url = Uri.parse('https://html.duckduckgo.com/html/?q=$query');
-      
-      final response = await http.get(url, headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      });
-
-      if (response.statusCode == 200) {
-        var document = parser.parse(response.body);
+      // 1. Fetch web results for context
+      String context = "";
+      try {
+        final query = Uri.encodeComponent(userMessage);
+        final url = Uri.parse('https://html.duckduckgo.com/html/?q=$query');
+        final searchRes = await http.get(url, headers: {'User-Agent': 'Mozilla/5.0'});
         
-        // Get all text from the result snippets
-        var snippets = document.getElementsByClassName('result__snippet');
-        if (snippets.isEmpty) return "I couldn't find any web results for that.";
-
-        // Combine all text into one giant string
-        String allText = snippets.map((e) => e.text.trim()).join(' ');
-
-        // 2. Send to C++ Core to extract the best sentence based on keywords
-        final core = DinorCore.load();
-        final bestAnswer = core.extractAiAnswer(userMessage, allText);
-
-        if (bestAnswer.isNotEmpty) {
-          return "Here is what I found:\n\n$bestAnswer";
-        } else {
-          // Fallback if C++ couldn't find a good match
-          final snippet = allText.length > 150 ? allText.substring(0, 150) : allText;
-          return "I found some results, but they didn't directly answer your question. Here is the raw context:\n\n$snippet...";
+        if (searchRes.statusCode == 200) {
+          var document = parser.parse(searchRes.body);
+          var snippets = document.getElementsByClassName('result__snippet');
+          if (snippets.isNotEmpty) {
+            context = snippets.take(3).map((e) => e.text.trim()).join('\n');
+          }
         }
+      } catch (e) {
+        debugPrint("Search failed, continuing with AI only: $e");
       }
-      return "My web search failed (Status: ${response.statusCode}).";
+
+      // 2. Call the secure Supabase Edge Function
+      final supabase = Supabase.instance.client;
+      final response = await supabase.functions.invoke(
+        'chat-ai',
+        body: {
+          'userMessage': userMessage,
+          'context': context,
+        },
+      );
+
+      if (response.status == 200 && response.data['reply'] != null) {
+        return response.data['reply'];
+      } else {
+        return "I'm having trouble thinking right now. (Error ${response.status})";
+      }
     } catch (e) {
-      return "Oops, I lost my internet connection. Error: $e";
+      return "Oops, I lost my connection. Error: $e";
     }
   }
 }
@@ -2736,36 +2826,765 @@ alter publication supabase_realtime add table public.messages;
 
 
 ============================================================
-FILE: supabase/migrations/20261023190055_create_google_tokens.sql
+FILE: supabase/functions/chat-ai/index.ts
 ============================================================
 
 
-create table public.google_tokens (
-  id integer primary key default 1,
-  refresh_token text not null
-);
-alter table public.google_tokens enable row level security;
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+
+  try {
+    const { userMessage, context } = await req.json()
+    
+    // Retrieve the secret key from Supabase Environment Variables
+    const groqApiKey = Deno.env.get('GROQ_API_KEY')
+    if (!groqApiKey) throw new Error("GROQ_API_KEY is not set in Supabase Secrets")
+
+    const prompt = context 
+      ? `Context: ${context}\n\nUser Question: ${userMessage}\n\nAnswer the user's question clearly using the context above.`
+      : `User Question: ${userMessage}\n\nAnswer clearly.`
+
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${groqApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: "llama3-8b-8192",
+        messages: [
+          { role: "system", content: "You are Dinor AI, a helpful, smart, and friendly assistant. Keep answers concise." },
+          { role: "user", content: prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 250,
+      }),
+    })
+
+    const data = await res.json()
+
+    if (data.choices && data.choices.length > 0) {
+      return new Response(JSON.stringify({ reply: data.choices[0].message.content.trim() }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    } else {
+      throw new Error("Invalid response from Groq")
+    }
+  } catch (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+})
 
 
 ============================================================
-FILE: supabase/migrations/20261023184659_create_otp_table.sql
+FILE: supabase/functions/chat-ai/deno.json
 ============================================================
 
--- Create OTP Codes table
-create table public.otp_codes (
-  email text primary key,
-  code text not null,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
+{
+  "imports": {
+    "@supabase/functions-js": "jsr:@supabase/functions-js@^2",
+    "@supabase/server": "npm:@supabase/server@^1"
+  }
+}
 
--- Enable RLS (Row Level Security)
-alter table public.otp_codes enable row level security;
 
--- Allow the Edge Function (service_role) to read/write, but deny public access
-create policy "Only service role can access OTPs"
-on public.otp_codes
-using (false)
-with check (false);
+============================================================
+FILE: supabase/functions/google-oauth-callback/index.ts
+============================================================
+
+import { createClient } from "npm:@supabase/supabase-js@2";
+
+const COOKIE = "dinor_oauth_state";
+
+function page(message: string, status = 200, clearCookie = false) {
+  const headers = new Headers({
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+  });
+
+  if (clearCookie) {
+    headers.append(
+      "Set-Cookie",
+      `${COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/functions/v1/google-oauth-callback; Max-Age=0`,
+    );
+  }
+
+  return new Response(
+    `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><h2>Dinor Google setup</h2><p>${message}</p></body></html>`,
+    { status, headers },
+  );
+}
+
+function getCookie(req: Request, name: string): string | null {
+  const cookie = req.headers.get("cookie") ?? "";
+  for (const part of cookie.split(";")) {
+    const [key, ...value] = part.trim().split("=");
+    if (key === name) return value.join("=");
+  }
+  return null;
+}
+
+Deno.serve(async (req) => {
+  if (req.method !== "GET") {
+    return page("Method not allowed.", 405);
+  }
+
+  const clientId = Deno.env.get("GOOGLE_CLIENT_ID");
+  const clientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET");
+  const redirectUri = Deno.env.get("GOOGLE_REDIRECT_URI");
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+  if (
+    !clientId || !clientSecret || !redirectUri ||
+    !supabaseUrl || !serviceRoleKey
+  ) {
+    console.error("Required OAuth or Supabase environment variables are missing.");
+    return page("Server configuration is incomplete.", 500);
+  }
+
+  const url = new URL(req.url);
+  const code = url.searchParams.get("code");
+  const returnedState = url.searchParams.get("state");
+  const googleError = url.searchParams.get("error");
+
+  if (googleError) {
+    return page("Google authorization was cancelled or denied.", 400, true);
+  }
+
+  // Start OAuth when Google has not redirected back with an authorization code.
+  if (!code) {
+    const stateBytes = crypto.getRandomValues(new Uint8Array(32));
+    const state = Array.from(stateBytes, (b) =>
+      b.toString(16).padStart(2, "0")
+    ).join("");
+
+    const authorize = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    authorize.searchParams.set("client_id", clientId);
+    authorize.searchParams.set("redirect_uri", redirectUri);
+    authorize.searchParams.set("response_type", "code");
+    authorize.searchParams.set(
+      "scope",
+      "https://www.googleapis.com/auth/gmail.send",
+    );
+    authorize.searchParams.set("access_type", "offline");
+    authorize.searchParams.set("prompt", "consent");
+    authorize.searchParams.set("state", state);
+
+    return new Response(null, {
+      status: 302,
+      headers: {
+        "Location": authorize.toString(),
+        "Cache-Control": "no-store",
+        "Set-Cookie":
+          `${COOKIE}=${state}; HttpOnly; Secure; SameSite=Lax; Path=/functions/v1/google-oauth-callback; Max-Age=600`,
+      },
+    });
+  }
+
+  // Validate the OAuth state to protect against forged callbacks.
+  const savedState = getCookie(req, COOKIE);
+  if (
+    !returnedState || !savedState ||
+    returnedState.length !== savedState.length
+  ) {
+    return page("OAuth state validation failed. Start again.", 400, true);
+  }
+
+  // Constant-time state comparison.
+  const encoder = new TextEncoder();
+  const a = encoder.encode(returnedState);
+  const b = encoder.encode(savedState);
+  let difference = a.length ^ b.length;
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    difference |= a[i] ^ b[i];
+  }
+  if (difference !== 0) {
+    return page("OAuth state validation failed. Start again.", 400, true);
+  }
+
+  try {
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        grant_type: "authorization_code",
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      console.error("Google token exchange failed with status", tokenResponse.status);
+      return page("Google token exchange failed. Please start again.", 502, true);
+    }
+
+    const tokens = await tokenResponse.json();
+    if (typeof tokens.refresh_token !== "string" || !tokens.refresh_token) {
+      return page(
+        "Google did not issue a refresh token. Revoke this app's Google access and repeat consent.",
+        400,
+        true,
+      );
+    }
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const { error } = await supabase
+      .from("google_oauth_credentials")
+      .upsert({
+        id: "gmail",
+        refresh_token: tokens.refresh_token,
+        updated_at: new Date().toISOString(),
+      });
+
+    if (error) {
+      console.error("Could not save OAuth credentials:", error.message);
+      return page("The token was obtained but could not be stored securely.", 500, true);
+    }
+
+    return page(
+      "Google authorization succeeded. The refresh token was saved server-side. You can close this page.",
+      200,
+      true,
+    );
+  } catch (error) {
+    console.error(
+      "OAuth callback failed:",
+      error instanceof Error ? error.message : "Unknown error",
+    );
+    return page("OAuth setup failed. Check the Edge Function logs.", 500, true);
+  }
+});
+
+
+============================================================
+FILE: supabase/functions/google-oauth-callback/deno.json
+============================================================
+
+{
+  "imports": {
+    "@supabase/functions-js": "jsr:@supabase/functions-js@^2",
+    "@supabase/server": "npm:@supabase/server@^1"
+  }
+}
+
+
+============================================================
+FILE: supabase/functions/request-email-code/index.ts
+============================================================
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+
+const cors = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Content-Type": "application/json",
+};
+
+function reply(status: number, body: Record<string, unknown>) {
+  return new Response(JSON.stringify(body), { status, headers: cors });
+}
+
+function base64Url(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+  if (req.method !== "POST") return reply(405, { error: "POST required" });
+  if (!req.headers.get("apikey")) return reply(401, { error: "Missing API key" });
+
+  try {
+    const body = await req.json();
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+
+    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return reply(400, { error: "Enter a valid email address." });
+    }
+
+    const url = Deno.env.get("SUPABASE_URL");
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const googleClientId = Deno.env.get("GOOGLE_CLIENT_ID");
+    const googleClientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET");
+
+    if (!url || !serviceKey || !googleClientId || !googleClientSecret) {
+      console.error("Required server secrets are missing.");
+      return reply(500, { error: "Email login is not configured." });
+    }
+
+    const admin = createClient(url, serviceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    // Limit each address to one request per minute and five per hour.
+    const now = Date.now();
+    const { data: limit, error: limitError } = await admin
+      .from("email_code_rate_limits")
+      .select("last_sent_at, window_started_at, request_count")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (limitError) throw limitError;
+
+    if (limit) {
+      const last = Date.parse(limit.last_sent_at);
+      const start = Date.parse(limit.window_started_at);
+      if (now - last < 60_000) {
+        return reply(429, { error: "Please wait a minute before requesting another code." });
+      }
+      if (now - start < 3_600_000 && Number(limit.request_count) >= 5) {
+        return reply(429, { error: "Too many requests. Try again in an hour." });
+      }
+
+      const resetWindow = now - start >= 3_600_000;
+      const { error } = await admin.from("email_code_rate_limits").update({
+        last_sent_at: new Date(now).toISOString(),
+        window_started_at: resetWindow ? new Date(now).toISOString() : limit.window_started_at,
+        request_count: resetWindow ? 1 : Number(limit.request_count) + 1,
+      }).eq("email", email);
+      if (error) throw error;
+    } else {
+      const { error } = await admin.from("email_code_rate_limits").insert({
+        email,
+        last_sent_at: new Date(now).toISOString(),
+        window_started_at: new Date(now).toISOString(),
+        request_count: 1,
+      });
+      if (error) throw error;
+    }
+
+    // Generate a Supabase Auth OTP, not an independent custom password.
+    const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
+      type: "magiclink",
+      email,
+    });
+
+    // Avoid revealing whether an account exists.
+    if (linkError || !linkData?.properties?.email_otp) {
+      return reply(200, {
+        message: "If an eligible account exists, a sign-in code will be sent.",
+      });
+    }
+
+    const { data: credential, error: credentialError } = await admin
+      .from("google_oauth_credentials")
+      .select("refresh_token")
+      .eq("id", "gmail")
+      .single();
+
+    if (credentialError || !credential?.refresh_token) {
+      console.error("Gmail refresh token is unavailable.");
+      return reply(500, { error: "Email delivery is not configured." });
+    }
+
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: googleClientId,
+        client_secret: googleClientSecret,
+        refresh_token: credential.refresh_token,
+        grant_type: "refresh_token",
+      }),
+    });
+
+    const tokenData = await tokenResponse.json();
+    if (!tokenResponse.ok || !tokenData.access_token) {
+      console.error("Google access-token refresh failed.");
+      return reply(502, { error: "Gmail authorization failed. Reconnect Gmail." });
+    }
+
+    const mime = [
+      `To: ${email}`,
+      "Subject: Your Dinor sign-in code",
+      "MIME-Version: 1.0",
+      "Content-Type: text/plain; charset=UTF-8",
+      "",
+      `Your Dinor six-digit sign-in code is: ${linkData.properties.email_otp}`,
+      "",
+      "Enter this code in the Dinor app to sign in.",
+      "If you did not request this code, you can ignore this email.",
+    ].join("\r\n");
+
+    const gmailResponse = await fetch(
+      "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenData.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ raw: base64Url(mime) }),
+      },
+    );
+
+    if (!gmailResponse.ok) {
+      console.error("Gmail API send failed:", gmailResponse.status);
+      return reply(502, { error: "Could not send the code. Please try again later." });
+    }
+
+    return reply(200, {
+      message: "If an eligible account exists, a sign-in code will be sent.",
+    });
+  } catch (error) {
+    console.error("request-email-code failed:", error);
+    return reply(500, { error: "Could not request a sign-in code." });
+  }
+});
+
+
+============================================================
+FILE: supabase/functions/request-email-code/deno.json
+============================================================
+
+{
+  "imports": {
+    "@supabase/functions-js": "jsr:@supabase/functions-js@^2",
+    "@supabase/server": "npm:@supabase/server@^1"
+  }
+}
+
+
+============================================================
+FILE: supabase/functions/verify-email-code/index.ts
+============================================================
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+
+const cors = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Content-Type": "application/json",
+};
+
+function reply(status: number, body: Record<string, unknown>) {
+  return new Response(JSON.stringify(body), { status, headers: cors });
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+  if (req.method !== "POST") return reply(405, { error: "POST required" });
+
+  // The Flutter client supplies its public Supabase key in the apikey header.
+  const apiKey = req.headers.get("apikey");
+  if (!apiKey) return reply(401, { error: "Missing API key" });
+
+  try {
+    const body = await req.json();
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const code = typeof body.code === "string" ? body.code.trim() : "";
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+        !/^\d{8}$/.test(code)) {
+      return reply(400, { error: "Enter a valid email and six-digit code." });
+    }
+
+    const url = Deno.env.get("SUPABASE_URL");
+    if (!url) return reply(500, { error: "Authentication is not configured." });
+
+    // Let Supabase Auth validate its own OTP and issue the real session.
+    const response = await fetch(`${url}/auth/v1/verify`, {
+      method: "POST",
+      headers: {
+        apikey: apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email,
+        token: code,
+        type: "magiclink",
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.access_token || !result.refresh_token) {
+      return reply(401, { error: "The code is invalid or expired. Request a new code." });
+    }
+
+    // These are session credentials intended for the authenticated client.
+    return reply(200, {
+      access_token: result.access_token,
+      refresh_token: result.refresh_token,
+      token_type: result.token_type,
+      expires_in: result.expires_in,
+      user: result.user,
+    });
+  } catch (error) {
+    console.error("verify-email-code failed:", error);
+    return reply(500, { error: "Could not verify the code." });
+  }
+});
+
+
+============================================================
+FILE: supabase/functions/verify-email-code/deno.json
+============================================================
+
+{
+  "imports": {
+    "@supabase/functions-js": "jsr:@supabase/functions-js@^2",
+    "@supabase/server": "npm:@supabase/server@^1"
+  }
+}
+
+
+============================================================
+FILE: .github/workflows/build-dinor.yml
+============================================================
+
+name: Build Dinor APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Print Flutter version
+        run: flutter --version
+
+      - name: Setup Permanent Debug Keystore
+        run: |
+          mkdir -p ~/.android
+          echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | tr -d ' \n\r' | base64 -d > ~/.android/debug.keystore
+          chmod 600 ~/.android/debug.keystore
+          echo "Keystore file size:"
+          ls -la ~/.android/debug.keystore
+
+      - name: Get Debug SHA-1
+        run: |
+          keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android | grep SHA1
+
+      - name: Cache pub packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            pub-${{ runner.os }}-
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build arm64 release APK
+        run: |
+          flutter build apk \
+            --release \
+            --target-platform android-arm64 \
+            --split-per-abi \
+            --obfuscate \
+            --split-debug-info=build/debug-info
+
+      - name: List output sizes
+        run: ls -lh build/app/outputs/flutter-apk/
+
+      - name: Upload arm64 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: dinor-apk-arm64
+          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          if-no-files-found: error
+
+      - name: Upload debug symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: dinor-debug-info
+          path: build/debug-info
+          if-no-files-found: warn
+
+
+============================================================
+FILE: android/app/src/main/AndroidManifest.xml
+============================================================
+
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Permissions for Media Picker -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+
+    <application
+        android:label="Dinor"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+
+            <!-- Deep linking for OAuth -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.dinor.dinor" android:host="login-callback" />
+            </intent-filter>
+
+        </activity>
+        
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+    
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+    </queries>
+</manifest>
+
+
+============================================================
+FILE: android/app/src/main/res/values/styles.xml
+============================================================
+
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Theme applied to the Android Window while the process is starting when the OS's Dark Mode setting is off -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <!-- Show a splash screen on the activity. Automatically removed when
+             the Flutter engine draws its first frame -->
+        <item name="android:windowBackground">@drawable/launch_background</item>
+    </style>
+    <!-- Theme applied to the Android Window as soon as the process has started.
+         This theme determines the color of the Android Window while your
+         Flutter UI initializes, as well as behind your Flutter UI while its
+         running.
+
+         This Theme is only used starting with V2 of Flutter's Android embedding. -->
+    <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">?android:colorBackground</item>
+    </style>
+</resources>
+
+
+============================================================
+FILE: android/app/src/main/res/drawable-v21/launch_background.xml
+============================================================
+
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Modify this file to customize your launch splash screen -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="?android:colorBackground" />
+
+    <!-- You can insert your own image assets here -->
+    <!-- <item>
+        <bitmap
+            android:gravity="center"
+            android:src="@mipmap/launch_image" />
+    </item> -->
+</layer-list>
+
+
+============================================================
+FILE: android/app/src/main/res/drawable/launch_background.xml
+============================================================
+
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Modify this file to customize your launch splash screen -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@android:color/white" />
+
+    <!-- You can insert your own image assets here -->
+    <!-- <item>
+        <bitmap
+            android:gravity="center"
+            android:src="@mipmap/launch_image" />
+    </item> -->
+</layer-list>
+
+
+============================================================
+FILE: android/app/src/main/res/values-night/styles.xml
+============================================================
+
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Theme applied to the Android Window while the process is starting when the OS's Dark Mode setting is on -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <!-- Show a splash screen on the activity. Automatically removed when
+             the Flutter engine draws its first frame -->
+        <item name="android:windowBackground">@drawable/launch_background</item>
+    </style>
+    <!-- Theme applied to the Android Window as soon as the process has started.
+         This theme determines the color of the Android Window while your
+         Flutter UI initializes, as well as behind your Flutter UI while its
+         running.
+
+         This Theme is only used starting with V2 of Flutter's Android embedding. -->
+    <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">?android:colorBackground</item>
+    </style>
+</resources>
 
 
 ============================================================
@@ -2817,6 +3636,7 @@ dependencies:
   connectivity_plus: ^7.3.2
   supabase_flutter: ^2.18.3
   url_launcher: ^6.3.3
+  google_sign_in: ^7.2.0
 
 dev_dependencies:
   flutter_test:
@@ -2969,6 +3789,15 @@ FILE: android/app/src/main/AndroidManifest.xml
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+
+            <!-- Deep linking for OAuth -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.dinor.dinor" android:host="login-callback" />
+            </intent-filter>
+
         </activity>
         
         <meta-data
@@ -3003,3 +3832,97 @@ FILE: android/app/proguard-rules.pro
 
 # Ignore missing Google Play Core classes (Fix for R8)
 -dontwarn com.google.android.play.core.**
+
+
+============================================================
+FILE: .github/workflows/build-dinor.yml
+============================================================
+
+name: Build Dinor APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Print Flutter version
+        run: flutter --version
+
+      - name: Setup Permanent Debug Keystore
+        run: |
+          mkdir -p ~/.android
+          echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | tr -d ' \n\r' | base64 -d > ~/.android/debug.keystore
+          chmod 600 ~/.android/debug.keystore
+          echo "Keystore file size:"
+          ls -la ~/.android/debug.keystore
+
+      - name: Get Debug SHA-1
+        run: |
+          keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android | grep SHA1
+
+      - name: Cache pub packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            pub-${{ runner.os }}-
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build arm64 release APK
+        run: |
+          flutter build apk \
+            --release \
+            --target-platform android-arm64 \
+            --split-per-abi \
+            --obfuscate \
+            --split-debug-info=build/debug-info
+
+      - name: List output sizes
+        run: ls -lh build/app/outputs/flutter-apk/
+
+      - name: Upload arm64 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: dinor-apk-arm64
+          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          if-no-files-found: error
+
+      - name: Upload debug symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: dinor-debug-info
+          path: build/debug-info
+          if-no-files-found: warn
