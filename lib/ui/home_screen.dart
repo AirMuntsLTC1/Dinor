@@ -23,11 +23,18 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Map<String, dynamic>> _conversations = [];
   List<Map<String, dynamic>> _searchResults = [];
   bool _isSearching = false;
+  final FocusNode _searchFocus = FocusNode();
 
   @override
   void initState() {
     super.initState();
     _listenToConversations();
+  }
+
+  @override
+  void dispose() {
+    _searchFocus.dispose();
+    super.dispose();
   }
 
   void _listenToConversations() {
@@ -57,6 +64,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openChat(String otherUserId, String name) async {
+    _searchFocus.unfocus(); // Hide keyboard before navigating
     final convId = await ChatService.getOrCreateConversation(otherUserId);
     if (mounted) {
       Navigator.push(
@@ -101,6 +109,8 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Container(
                 decoration: BoxDecoration(color: DinorTheme.surfaceDark, borderRadius: BorderRadius.circular(16), boxShadow: DinorTheme.softShadow),
                 child: TextField(
+                  focusNode: _searchFocus,
+                  autofocus: false, // Prevents the keyboard from popping up automatically
                   onChanged: _searchUsers,
                   style: const TextStyle(color: Colors.white),
                   decoration: const InputDecoration(hintText: 'Search users...', hintStyle: TextStyle(color: DinorTheme.textGrey), prefixIcon: Icon(Icons.search, color: DinorTheme.textGrey), border: InputBorder.none, contentPadding: EdgeInsets.symmetric(vertical: 14)),
@@ -174,6 +184,7 @@ class _HomeScreenState extends State<HomeScreen> {
             CustomBottomNav(
               currentIndex: _currentIndex,
               onTap: (index) {
+                _searchFocus.unfocus(); // Hide keyboard when tapping bottom nav
                 if (index == 3) {
                   Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen())).then((_) => setState(() => _currentIndex = 0));
                 } else {
