@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const corsHeaders = {
@@ -12,13 +11,16 @@ serve(async (req) => {
   try {
     const { userMessage, context } = await req.json()
     
-    // Retrieve the secret key from Supabase Environment Variables
     const groqApiKey = Deno.env.get('GROQ_API_KEY')
     if (!groqApiKey) throw new Error("GROQ_API_KEY is not set in Supabase Secrets")
 
-    const prompt = context 
-      ? `Context: ${context}\n\nUser Question: ${userMessage}\n\nAnswer the user's question clearly using the context above.`
-      : `User Question: ${userMessage}\n\nAnswer clearly.`
+    // Ensure the prompt is a clean string without weird formatting
+    let prompt = "";
+    if (context && context.trim().length > 0) {
+      prompt = `Context from web: ${context}\n\nUser Question: ${userMessage}\n\nProvide a clear, concise answer based on the context.`;
+    } else {
+      prompt = `User Question: ${userMessage}\n\nProvide a clear, concise answer.`;
+    }
 
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -27,15 +29,27 @@ serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: "llama3-8b-8192",
+        model: "llama-3.1-8b-instant",
         messages: [
-          { role: "system", content: "You are Dinor AI, a helpful, smart, and friendly assistant. Keep answers concise." },
-          { role: "user", content: prompt }
+          { 
+            role: "system", 
+            content: "You are Dinor AI, a helpful and friendly assistant. Answer in plain text." 
+          },
+          { 
+            role: "user", 
+            content: prompt 
+          }
         ],
-        temperature: 0.7,
-        max_tokens: 250,
+        temperature: 0.5,
+        max_tokens: 300,
       }),
     })
+
+    // Catch the actual error from Groq instead of failing silently
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(JSON.stringify(errorData));
+    }
 
     const data = await res.json()
 
@@ -44,7 +58,7 @@ serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     } else {
-      throw new Error("Invalid response from Groq")
+      throw new Error("No choices returned from Groq")
     }
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message }), {
