@@ -466,6 +466,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int _searchSeq = 0;  // drops out-of-order search responses
   bool _incomingDialogOpen = false;
   BuildContext? _dialogContext;
+  Timer? _homePoll;
 
   @override
   void initState() {
@@ -483,6 +484,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // 3. Realtime updates, debounced so bursts trigger one refresh.
     _subscribeRealtime();
+    // Fallback: refresh the chat list regularly, in case Realtime lags.
+    _homePoll = Timer.periodic(const Duration(seconds: 6), (_) => _scheduleRefresh());
 
     // 4. Calls addressed to this user.
     CallService.startIncomingListener();
@@ -510,6 +513,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _refreshDebounce?.cancel();
     _searchDebounce?.cancel();
+    _homePoll?.cancel();
     _convChannel?.unsubscribe();
     CallService.incoming.removeListener(_onIncomingCall);
     _searchFocus.dispose();
@@ -899,6 +903,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   final supabase = Supabase.instance.client;
   RealtimeChannel? _chatChannel;
+  Timer? _pollTimer;
+  String? _lastCreatedAt;
   String? _currentUserId;
   String? _resolvedConversationId;
 
@@ -952,6 +958,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
     // 3. Subscribe first, then fetch, so no message can slip between the two.
     _subscribeRealtime(convId);
+    // Fallback: check for new messages every few seconds, in case Realtime lags.
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _pollNewMessages());
     await _fetchMessages();
     ChatService.markAsRead(convId);
   }
@@ -977,6 +986,10 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Adds a server row exactly once. When our own message echoes back over
   /// realtime, it replaces the pending bubble instead of appearing twice.
   void _ingest(Map<String, dynamic> row) {
+    final createdAt = row['created_at']?.toString();
+    if (createdAt != null && (_lastCreatedAt == null || createdAt.compareTo(_lastCreatedAt!) > 0)) {
+      _lastCreatedAt = createdAt;
+    }
     final id = row['id'].toString();
     if (_messages.any((m) => m.id == id)) return;
 
@@ -1011,7 +1024,9 @@ class _ChatScreenState extends State<ChatScreen> {
           .order('created_at', ascending: true);
       if (!mounted) return;
 
-      final server = List<Map<String, dynamic>>.from(data).map(_rowToMessage).toList();
+      final rawRows = List<Map<String, dynamic>>.from(data);
+      if (rawRows.isNotEmpty) _lastCreatedAt = rawRows.last['created_at']?.toString();
+      final server = rawRows.map(_rowToMessage).toList();
       final serverIds = server.map((m) => m.id).toSet();
       final localPending = _messages.where((m) => m.id.startsWith('temp_') && !serverIds.contains(m.id)).toList();
       final next = [...server, ...localPending];
@@ -1079,8 +1094,29 @@ class _ChatScreenState extends State<ChatScreen> {
     LocalCache.saveMessages(convId, rows);
   }
 
+  /// Polling fallback: fetches only messages newer than the last one we have.
+  Future<void> _pollNewMessages() async {
+    final convId = _resolvedConversationId;
+    if (convId == null || !mounted) return;
+    try {
+      final rows = await supabase
+          .from('messages')
+          .select()
+          .eq('conversation_id', convId)
+          .gt('created_at', _lastCreatedAt ?? '1970-01-01T00:00:00+00:00')
+          .order('created_at', ascending: true);
+      for (final row in List<Map<String, dynamic>>.from(rows)) {
+        if (!mounted) return;
+        _ingest(row);
+      }
+    } catch (e) {
+      debugPrint('message poll: $e');
+    }
+  }
+
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _menuOverlay?.remove();
     _menuOverlay = null;
     _chatChannel?.unsubscribe();
@@ -4717,6 +4753,9 @@ class CallService {
 
   static Future<void> _iceWriteChain = Future.value();
   static Timer? _ringTimer;
+  static Timer? _callPoll;
+  static Timer? _incomingPoll;
+  static final Set<String> _seenCallIds = {};
 
   static String? get currentCallId => _callId;
 
@@ -4763,12 +4802,64 @@ class CallService {
           callback: (payload) => _onIncomingUpdate(payload.newRecord),
         )
         .subscribe();
+
+    // Fallback: check for calls directly, so ringing works even if Realtime lags.
+    _incomingPoll?.cancel();
+    _incomingPoll = Timer.periodic(const Duration(seconds: 3), (_) => _pollIncoming());
   }
 
   static void stopIncomingListener() {
     _incomingChannel?.unsubscribe();
     _incomingChannel = null;
+    _incomingPoll?.cancel();
+    _incomingPoll = null;
     _clearIncoming();
+  }
+
+  /// Polling fallback for incoming calls and cancellations.
+  static Future<void> _pollIncoming() async {
+    final me = _db.auth.currentUser?.id;
+    if (me == null) return;
+    try {
+      final current = incoming.value;
+      if (current != null) {
+        final row = await _db.from('calls').select('status').eq('id', current.callId).maybeSingle();
+        if (row == null || row['status'] != 'ringing') _clearIncoming();
+        return;
+      }
+      if (phase.value != CallPhase.idle) return;
+      final since = DateTime.now().toUtc().subtract(const Duration(seconds: 60)).toIso8601String();
+      final rows = await _db
+          .from('calls')
+          .select()
+          .eq('receiver_id', me)
+          .eq('status', 'ringing')
+          .gt('created_at', since)
+          .order('created_at', ascending: false)
+          .limit(1);
+      for (final r in List<Map<String, dynamic>>.from(rows)) {
+        await _onIncomingRow(r);
+      }
+    } catch (e) {
+      debugPrint('incoming poll: $e');
+    }
+  }
+
+  /// Polling fallback for an active call: keeps signaling moving without Realtime.
+  static void _startCallPoll() {
+    _callPoll?.cancel();
+    _callPoll = Timer.periodic(const Duration(seconds: 2), (_) => _pollCall());
+  }
+
+  static Future<void> _pollCall() async {
+    final id = _callId;
+    if (id == null) return;
+    try {
+      final row = await _db.from('calls').select().eq('id', id).maybeSingle();
+      if (row != null && id == _callId) await _applyRow(row);
+    } catch (e) {
+      debugPrint('call poll: $e');
+    }
   }
 
   static void _clearIncoming() {
@@ -4778,6 +4869,8 @@ class CallService {
 
   static Future<void> _onIncomingRow(Map<String, dynamic> row) async {
     if (row['status'] != 'ringing') return;
+    // Realtime and polling can both report the same call: handle it once.
+    if (!_seenCallIds.add(row['id'].toString())) return;
     if (phase.value != CallPhase.idle) {
       // Already on a call: decline so the caller does not ring forever.
       await _declineRow(row['id'].toString());
@@ -4854,6 +4947,7 @@ class CallService {
       }).eq('id', _callId!);
 
       _subscribe();
+      _startCallPoll();
       // Catch an answer that was written before the subscription went live.
       final current = await _db.from('calls').select().eq('id', _callId!).single();
       await _applyRow(current);
@@ -4912,6 +5006,7 @@ class CallService {
       }).eq('id', callId);
 
       _subscribe();
+      _startCallPoll();
       await _applyRow(row);
     } catch (e) {
       debugPrint('acceptCall failed: $e');
@@ -5068,6 +5163,8 @@ class CallService {
     lastEndReason = reason;
     _ringTimer?.cancel();
     _ringTimer = null;
+    _callPoll?.cancel();
+    _callPoll = null;
 
     // Take ownership of everything first, so a second call cannot touch it.
     final id = _callId;
