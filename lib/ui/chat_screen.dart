@@ -13,7 +13,6 @@ import 'ai_avatar.dart';
 import 'media_picker.dart';
 import 'emoji_picker.dart';
 import 'media_viewer.dart';
-import 'package:intl/intl.dart';
 import 'dinor_theme.dart';
 
 enum MessageStatus { sending, sent, failed }
