@@ -50,3 +50,6 @@ pubspec.lock
 
 supabase_*dump*.sql
 dinor_database_export.txt
+
+supabase_*dump*.sql
+dinor_database_export.txt
