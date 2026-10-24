@@ -96,12 +96,10 @@ class _ChatScreenState extends State<ChatScreen> {
                   isImage: newMsg['is_image'] ?? false,
                   isRead: newMsg['is_read'] ?? false,
                   albumId: newMsg['album_id'],
+                  caption: newMsg['caption'],
                 ));
               });
               _scrollToBottom();
-            }
-            if (widget.conversationId != null && newMsg['sender_id'] != _currentUserId) {
-              ChatService.markAsRead(widget.conversationId!);
             }
           }
         }
@@ -121,6 +119,7 @@ class _ChatScreenState extends State<ChatScreen> {
             isImage: row['is_image'] ?? false,
             isRead: row['is_read'] ?? false,
             albumId: row['album_id'],
+            caption: row['caption'],
           ));
         }
       });
@@ -315,28 +314,19 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-
   void _deleteMessage(Message msg) {
-    // 1. Determine which messages to delete
     List<Message> toDelete = [];
-    
-    // If it's part of a photo album, delete the whole album
     if (msg.albumId != null) {
       toDelete = _messages.where((m) => m.albumId == msg.albumId).toList();
-    } 
-    // Otherwise, it's a single message (Text, GIF, or Single Photo)
-    else {
+    } else {
       toDelete = [msg];
     }
 
-    // 2. INSTANTLY remove from UI (Optimistic Update)
     setState(() {
       _messages.removeWhere((m) => toDelete.any((d) => d.id == m.id));
     });
 
-    // 3. Delete from Supabase in the background
     for (var m in toDelete) {
-      // Only delete from DB if it's a real message (saved in DB)
       if (!m.id.startsWith('temp_')) {
         supabase.from('messages').delete().eq('id', m.id).then((_) {
           debugPrint("Deleted message ${m.id} from Supabase");
@@ -345,9 +335,6 @@ class _ChatScreenState extends State<ChatScreen> {
         });
       }
     }
-    
-    // Note: If the deleted message was the last message, the Home Screen will 
-    // automatically update its preview via real-time when the DB deletion completes.
   }
 
   void _closeMessageMenu() {
@@ -372,16 +359,17 @@ class _ChatScreenState extends State<ChatScreen> {
     return const SizedBox.shrink();
   }
 
+  // ---------------------------------------------------------------------------
+  // PERFECTED GRID: Handles 1, 2, 3, 4, and 4+ images.
+  // ---------------------------------------------------------------------------
   Widget _buildAlbumGrid(List<Message> images, bool isMe) {
     int count = images.length;
-    int displayCount = count > 4 ? 3 : count;
-    // Telegram uses a very tight 2px gap
     const double gap = 2.0;
     const double totalSize = 260.0;
 
-    if (displayCount == 1) {
+    if (count == 1) {
       return _buildSingleImage(images[0]);
-    } else if (displayCount == 2) {
+    } else if (count == 2) {
       return Row(
         children: [
           Expanded(child: _buildGridImage(images[0])),
@@ -389,7 +377,7 @@ class _ChatScreenState extends State<ChatScreen> {
           Expanded(child: _buildGridImage(images[1])),
         ],
       );
-    } else if (displayCount == 3) {
+    } else if (count == 3) {
       return SizedBox(
         height: totalSize,
         child: Row(
@@ -408,7 +396,35 @@ class _ChatScreenState extends State<ChatScreen> {
           ],
         ),
       );
+    } else if (count == 4) {
+      return SizedBox(
+        height: totalSize,
+        child: Column(
+          children: [
+            Expanded(
+              child: Row(
+                children: [
+                  Expanded(child: _buildGridImage(images[0])),
+                  const SizedBox(width: gap),
+                  Expanded(child: _buildGridImage(images[1])),
+                ],
+              ),
+            ),
+            const SizedBox(height: gap),
+            Expanded(
+              child: Row(
+                children: [
+                  Expanded(child: _buildGridImage(images[2])),
+                  const SizedBox(width: gap),
+                  Expanded(child: _buildGridImage(images[3])),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
     } else {
+      // 5 or more images: 2x2 grid with a +N overlay on the 4th slot
       return SizedBox(
         height: totalSize,
         child: Column(
@@ -433,13 +449,15 @@ class _ChatScreenState extends State<ChatScreen> {
                       fit: StackFit.expand,
                       children: [
                         _buildGridImage(images[3]),
-                        if (count > 4)
-                          Container(
-                            color: Colors.black.withValues(alpha: 0.5),
-                            child: Center(
-                              child: Text('+${count - 4}', style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                        Container(
+                          color: Colors.black.withValues(alpha: 0.5),
+                          child: Center(
+                            child: Text(
+                              '+${count - 4}',
+                              style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
                             ),
                           ),
+                        ),
                       ],
                     ),
                   ),
@@ -458,6 +476,7 @@ class _ChatScreenState extends State<ChatScreen> {
       child: CachedNetworkImage(
         imageUrl: img.text,
         fit: BoxFit.cover,
+        memCacheWidth: 520,
         placeholder: (c, u) => Container(color: Colors.grey[800], height: 260, child: const Center(child: CircularProgressIndicator())),
         errorWidget: (c, u, e) => Container(color: Colors.grey[800], height: 260, child: const Icon(Icons.broken_image)),
       ),
@@ -469,6 +488,7 @@ class _ChatScreenState extends State<ChatScreen> {
       child: CachedNetworkImage(
         imageUrl: img.text,
         fit: BoxFit.cover,
+        memCacheWidth: 520,
         placeholder: (c, u) => Container(color: Colors.grey[800]),
         errorWidget: (c, u, e) => Container(color: Colors.grey[800], child: const Icon(Icons.broken_image, color: Colors.white)),
       ),
@@ -566,7 +586,7 @@ class _ChatScreenState extends State<ChatScreen> {
               controller: _scrollController,
               padding: const EdgeInsets.all(16),
               // ignore: deprecated_member_use
-              cacheExtent: 1000.0,
+              cacheExtent: 1500.0,
               itemCount: _messages.length + (_isAiTyping ? 1 : 0),
               itemBuilder: (context, index) {
                 if (index == _messages.length && _isAiTyping) {
@@ -585,6 +605,15 @@ class _ChatScreenState extends State<ChatScreen> {
                 if (msg.isImage && msg.albumId != null) {
                   final albumImages = _messages.where((m) => m.albumId == msg.albumId).toList();
                   if (albumImages.isNotEmpty && albumImages.first.id == msg.id) {
+                    // Find if the first image has a caption
+                    String? albumCaption;
+                    for (var i in albumImages) {
+                      if (i.caption != null && i.caption!.isNotEmpty) {
+                        albumCaption = i.caption;
+                        break;
+                      }
+                    }
+
                     return Align(
                       alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
                       child: GestureDetector(
@@ -598,20 +627,37 @@ class _ChatScreenState extends State<ChatScreen> {
                                 initialIndex: 0,
                                 senderName: msg.isMe ? "You" : widget.title,
                                 senderAvatar: "",
-                                caption: albumImages.first.caption,
+                                caption: albumCaption,
                                 timestamp: DateTime.now(),
                               ),
                             ),
                           );
                         },
-                        child: Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          width: 260,
-                          clipBehavior: Clip.hardEdge,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: _buildAlbumGrid(albumImages, msg.isMe),
+                        child: Column(
+                          crossAxisAlignment: msg.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              margin: const EdgeInsets.only(bottom: 4),
+                              width: 260,
+                              clipBehavior: Clip.hardEdge,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: _buildAlbumGrid(albumImages, msg.isMe),
+                            ),
+                            // Caption bubble under the album
+                            if (albumCaption != null && albumCaption.isNotEmpty)
+                              Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                decoration: BoxDecoration(
+                                  gradient: msg.isMe ? DinorTheme.primaryGradient : null,
+                                  color: msg.isMe ? null : DinorTheme.surfaceDark,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: Text(albumCaption, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                              ),
+                          ],
                         ),
                       ),
                     );
@@ -637,30 +683,36 @@ class _ChatScreenState extends State<ChatScreen> {
                             children: [
                               msg.text.startsWith('http')
                                   ? GestureDetector(
-    onTap: () {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => MediaViewer(
-            mediaUrls: [msg.text],
-            initialIndex: 0,
-            senderName: msg.isMe ? "You" : widget.title,
-            senderAvatar: "",
-            caption: msg.caption,
-            timestamp: DateTime.now(),
-          ),
-        ),
-      );
-    },
-    child: CachedNetworkImage(imageUrl: msg.text, width: 240, fit: BoxFit.cover, memCacheWidth: 480, placeholder: (c, u) => Container(width: 240, height: 200, color: Colors.grey[800], child: const Center(child: CircularProgressIndicator(color: Colors.white)))),
-  )
+                                      onTap: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) => MediaViewer(
+                                              mediaUrls: [msg.text],
+                                              initialIndex: 0,
+                                              senderName: msg.isMe ? "You" : widget.title,
+                                              senderAvatar: "",
+                                              caption: msg.caption,
+                                              timestamp: DateTime.now(),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                      child: CachedNetworkImage(
+                                        imageUrl: msg.text, 
+                                        width: 240, 
+                                        fit: BoxFit.cover, 
+                                        memCacheWidth: 480, 
+                                        placeholder: (c, u) => Container(width: 240, height: 200, color: Colors.grey[800], child: const Center(child: CircularProgressIndicator(color: Colors.white)))
+                                      ),
+                                    )
                                   : Image.file(File(msg.text), width: 240, fit: BoxFit.cover, cacheWidth: 480),
                               if (msg.text.contains('.mp4') || msg.text.contains('video'))
                                 Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.5), shape: BoxShape.circle), child: const Icon(Icons.pause, color: Colors.white, size: 32)),
                             ],
                           ),
                         ),
-                        // If there's a caption, give the text its own small bubble
+                        // Caption bubble under single image
                         if (msg.caption != null && msg.caption!.isNotEmpty)
                           Container(
                             margin: const EdgeInsets.only(top: 4),
@@ -786,7 +838,6 @@ class _ChatScreenState extends State<ChatScreen> {
                                 if (cachedFiles.isEmpty) return;
 
                                 if (widget.isAi) {
-                                  // AI handling (unchanged)
                                   for (var file in cachedFiles) {
                                     final bytes = await file.readAsBytes();
                                     final base64String = base64Encode(bytes);
@@ -836,9 +887,9 @@ class _ChatScreenState extends State<ChatScreen> {
                                         'conversation_id': widget.conversationId,
                                         'is_read': false,
                                         'album_id': albumId,
+                                        'caption': (i == 0 && caption.isNotEmpty) ? caption : null,
                                       }).select('id').single();
 
-                                      // Replace temp message with sent message
                                       setState(() {
                                         final index = _messages.indexWhere((m) => m.id == tempId);
                                         if (index != -1) {
@@ -855,7 +906,6 @@ class _ChatScreenState extends State<ChatScreen> {
                                       });
 
                                     } catch (e) {
-                                      // Mark as failed if upload fails
                                       setState(() {
                                         final index = _messages.indexWhere((m) => m.id == tempId);
                                         if (index != -1) {
@@ -872,7 +922,6 @@ class _ChatScreenState extends State<ChatScreen> {
                                     }
                                   }
 
-                                  // Update conversation last message
                                   await supabase.from('conversations').update({
                                     'last_message': '📷 ${cachedFiles.length} Photos',
                                     'last_message_time': DateTime.now().toUtc().toIso8601String(),
@@ -881,7 +930,8 @@ class _ChatScreenState extends State<ChatScreen> {
                               }
                             },
                           ),
-                                                    Expanded(
+                          
+                          Expanded(
                             child: Padding(
                               padding: const EdgeInsets.symmetric(vertical: 10),
                               child: TextField(
@@ -925,11 +975,8 @@ class _ChatScreenState extends State<ChatScreen> {
                                       _scrollToBottom();
 
                                       try {
-                                        // 1. Pre-cache the GIF locally so it shows instantly
-                                        // CachedNetworkImage caches automatically, we just evict the old one if it exists
                                         await CachedNetworkImage.evictFromCache(url);
 
-                                        // 2. Save to database
                                         final response = await supabase.from('messages').insert({
                                           'sender_id': _currentUserId,
                                           'content': url,
@@ -944,11 +991,10 @@ class _ChatScreenState extends State<ChatScreen> {
                                         });
                                         
                                         await supabase.from('conversations').update({
-                                          'last_message': '🎬 GIF',
+                                          'last_message': 'Attach GIF',
                                           'last_message_time': DateTime.now().toUtc().toIso8601String(),
                                         }).eq('id', widget.conversationId!);
                                       } catch (e) {
-                                        // Mark as failed if caching or saving fails
                                         setState(() {
                                           final index = _messages.indexWhere((m) => m.id == tempId);
                                           if (index != -1) _messages[index] = Message(tempId, url, true, isImage: true, status: MessageStatus.failed);
