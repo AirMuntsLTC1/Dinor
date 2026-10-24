@@ -554,11 +554,10 @@ class _ChatScreenState extends State<ChatScreen> {
                       child: Container(
                         margin: const EdgeInsets.only(bottom: 8),
                         width: 260,
+                        clipBehavior: Clip.hardEdge,
                         decoration: BoxDecoration(
-                          color: DinorTheme.surfaceDark,
                           borderRadius: BorderRadius.circular(16),
                         ),
-                        clipBehavior: Clip.hardEdge,
                         child: _buildAlbumGrid(albumImages, msg.isMe),
                       ),
                     );
@@ -568,7 +567,46 @@ class _ChatScreenState extends State<ChatScreen> {
                 }
                 // --- END ALBUM LOGIC ---
 
-                Widget messageBubble = Container(
+                Widget messageBubble;
+                
+                if (msg.isImage) {
+                  // Raw Media (No Bubble Background)
+                  messageBubble = Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: Column(
+                      crossAxisAlignment: msg.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              msg.text.startsWith('http')
+                                  ? CachedNetworkImage(imageUrl: msg.text, width: 240, fit: BoxFit.cover, memCacheWidth: 480, placeholder: (c, u) => Container(width: 240, height: 200, color: Colors.grey[800], child: const Center(child: CircularProgressIndicator(color: Colors.white))))
+                                  : Image.file(File(msg.text), width: 240, fit: BoxFit.cover, cacheWidth: 480),
+                              if (msg.text.contains('.mp4') || msg.text.contains('video'))
+                                Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.5), shape: BoxShape.circle), child: const Icon(Icons.pause, color: Colors.white, size: 32)),
+                            ],
+                          ),
+                        ),
+                        // If there's a caption, give the text its own small bubble
+                        if (msg.caption != null && msg.caption!.isNotEmpty)
+                          Container(
+                            margin: const EdgeInsets.only(top: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              gradient: msg.isMe ? DinorTheme.primaryGradient : null,
+                              color: msg.isMe ? null : DinorTheme.surfaceDark,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Text(msg.caption!, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                          ),
+                      ],
+                    ),
+                  );
+                } else {
+                  // Text Message (With Bubble Background)
+                  messageBubble = Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     decoration: BoxDecoration(
@@ -581,37 +619,17 @@ class _ChatScreenState extends State<ChatScreen> {
                         bottomRight: msg.isMe ? const Radius.circular(4) : const Radius.circular(20),
                       ),
                     ),
-                    child: msg.isImage
-                        ? Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: Stack(
-                                  alignment: Alignment.center,
-                                  children: [
-                                    msg.text.startsWith('http')
-                                        ? CachedNetworkImage(imageUrl: msg.text, width: 200, fit: BoxFit.cover, memCacheWidth: 400, placeholder: (c, u) => const SizedBox(width: 200, height: 150, child: Center(child: CircularProgressIndicator(color: Colors.white))))
-                                        : Image.file(File(msg.text), width: 200, fit: BoxFit.cover, cacheWidth: 400),
-                                    if (msg.text.contains('.mp4') || msg.text.contains('video'))
-                                      Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.5), shape: BoxShape.circle), child: const Icon(Icons.pause, color: Colors.white, size: 32)),
-                                  ],
-                                ),
-                              ),
-                              if (msg.caption != null && msg.caption!.isNotEmpty)
-                                Padding(padding: const EdgeInsets.only(top: 8.0), child: Text(msg.caption!, style: const TextStyle(color: Colors.white, fontSize: 14))),
-                            ],
-                          )
-                        : Text(
-                            msg.text, 
-                            style: TextStyle(
-                              color: msg.isMe 
-                                  ? (msg.isRead ? Colors.grey[400] : Colors.white) 
-                                  : Colors.white, 
-                              fontSize: 16
-                            )
-                          ),
+                    child: Text(
+                      msg.text, 
+                      style: TextStyle(
+                        color: msg.isMe 
+                            ? (msg.isRead ? Colors.grey[400] : Colors.white) 
+                            : Colors.white, 
+                        fontSize: 16
+                      )
+                    ),
                   );
+                }
 
                 if (msg.isMe) {
                   messageBubble = Column(
@@ -835,23 +853,36 @@ class _ChatScreenState extends State<ChatScreen> {
                                       setState(() => _messages.add(Message(tempId, url, true, isImage: true, status: MessageStatus.sending)));
                                       _scrollToBottom();
 
-                                      final response = await supabase.from('messages').insert({
-                                        'sender_id': _currentUserId,
-                                        'content': url,
-                                        'is_image': true,
-                                        'conversation_id': widget.conversationId,
-                                        'is_read': false,
-                                      }).select('id').single();
+                                      try {
+                                        // 1. Pre-cache the GIF locally so it shows instantly
+                                        await CachedNetworkImage.evictFromCache(url);
+                                        await precacheImage(CachedNetworkImageProvider(url), context);
 
-                                      setState(() {
-                                        final index = _messages.indexWhere((m) => m.id == tempId);
-                                        if (index != -1) _messages[index] = Message(response['id'].toString(), url, true, isImage: true, status: MessageStatus.sent);
-                                      });
-                                      
-                                      await supabase.from('conversations').update({
-                                        'last_message': '🎬 GIF',
-                                        'last_message_time': DateTime.now().toUtc().toIso8601String(),
-                                      }).eq('id', widget.conversationId!);
+                                        // 2. Save to database
+                                        final response = await supabase.from('messages').insert({
+                                          'sender_id': _currentUserId,
+                                          'content': url,
+                                          'is_image': true,
+                                          'conversation_id': widget.conversationId,
+                                          'is_read': false,
+                                        }).select('id').single();
+
+                                        setState(() {
+                                          final index = _messages.indexWhere((m) => m.id == tempId);
+                                          if (index != -1) _messages[index] = Message(response['id'].toString(), url, true, isImage: true, status: MessageStatus.sent);
+                                        });
+                                        
+                                        await supabase.from('conversations').update({
+                                          'last_message': '🎬 GIF',
+                                          'last_message_time': DateTime.now().toUtc().toIso8601String(),
+                                        }).eq('id', widget.conversationId!);
+                                      } catch (e) {
+                                        // Mark as failed if caching or saving fails
+                                        setState(() {
+                                          final index = _messages.indexWhere((m) => m.id == tempId);
+                                          if (index != -1) _messages[index] = Message(tempId, url, true, isImage: true, status: MessageStatus.failed);
+                                        });
+                                      }
                                     }
                                   },
                                 ),
