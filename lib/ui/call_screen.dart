@@ -1,18 +1,25 @@
-import 'package:flutter/material.dart';
 import 'dart:async';
+
+import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../chat/call_service.dart';
 
+/// Full-screen audio call. Reflects real WebRTC state from [CallService].
+///
+/// Pass [incomingCallId] when answering a call that someone else started.
 class CallScreen extends StatefulWidget {
   final String receiverName;
   final String? receiverId;
   final String conversationId;
+  final String? incomingCallId;
 
   const CallScreen({
     super.key,
     required this.receiverName,
     required this.receiverId,
     required this.conversationId,
+    this.incomingCallId,
   });
 
   @override
@@ -20,43 +27,104 @@ class CallScreen extends StatefulWidget {
 }
 
 class _CallScreenState extends State<CallScreen> {
-  String _status = 'Calling';
-  bool _isEnded = false;
-  
-  // Timer logic
-  Timer? _timer;
+  Timer? _ticker;
   int _secondsElapsed = 0;
-  bool _isConnected = false;
+  bool _started = false;
+  bool _closing = false;
+  bool get _isIncoming => widget.incomingCallId != null;
 
   @override
   void initState() {
     super.initState();
-    _startCall();
+    CallService.phase.addListener(_onPhaseChanged);
+    CallService.connectedAtMs.addListener(_onConnectedChanged);
+    _start();
   }
 
-  Future<void> _startCall() async {
-    if (widget.receiverId != null) {
+  Future<void> _start() async {
+    _started = true;
+    if (_isIncoming) {
+      await CallService.acceptCall(widget.incomingCallId!);
+    } else if (widget.receiverId != null) {
       await CallService.startCall(widget.receiverId!, widget.conversationId);
     }
-    
-    // Simulate the call being picked up after 3 seconds
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted && !_isEnded) {
-        setState(() {
-          _status = 'Connected';
-          _isConnected = true;
-        });
-        _startTimer();
-      }
-    });
+    // If the service never left idle (e.g. call already in progress), close.
+    if (mounted && CallService.phase.value == CallPhase.idle && CallService.lastEndReason == 'failed') {
+      _finish();
+    }
   }
 
-  void _startTimer() {
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) {
-        setState(() => _secondsElapsed++);
-      }
-    });
+  void _onConnectedChanged() {
+    if (CallService.connectedAtMs.value != null && _ticker == null && mounted) {
+      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        final start = CallService.connectedAtMs.value;
+        if (start == null) return;
+        setState(() {
+          _secondsElapsed = (DateTime.now().millisecondsSinceEpoch - start) ~/ 1000;
+        });
+      });
+    }
+  }
+
+  void _onPhaseChanged() {
+    if (!mounted) return;
+    setState(() {});
+    // Phase returns to idle when the call is over (ended, declined, missed, failed).
+    if (_started && CallService.phase.value == CallPhase.idle) {
+      _finish();
+    }
+  }
+
+  Future<void> _finish() async {
+    if (_closing) return;
+    _closing = true;
+    _ticker?.cancel();
+    CallService.phase.removeListener(_onPhaseChanged);
+    CallService.connectedAtMs.removeListener(_onConnectedChanged);
+
+    await _logCallIfNeeded();
+
+    if (mounted) {
+      // Brief pause so the user sees "Call ended" / "No answer".
+      await Future.delayed(const Duration(milliseconds: 700));
+      if (mounted) Navigator.of(context).pop();
+    }
+  }
+
+  /// Only the caller writes the call log, so each call produces one entry.
+  Future<void> _logCallIfNeeded() async {
+    if (_isIncoming) return;
+    final reason = CallService.lastEndReason;
+    final connectedAt = CallService.connectedAtMs.value;
+    final wasConnected = _secondsElapsed > 0 || connectedAt != null;
+    final supabase = Supabase.instance.client;
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) return;
+
+    String? text;
+    if (wasConnected) {
+      text = '📞 Outgoing call (Duration: ${_formatTime(_secondsElapsed)})';
+    } else if (reason == 'missed' || reason == 'declined') {
+      text = reason == 'declined' ? '📞 Call declined' : '📞 Missed call';
+    }
+    if (text == null) return;
+
+    try {
+      await supabase.from('messages').insert({
+        'sender_id': userId,
+        'content': text,
+        'is_image': false,
+        'conversation_id': widget.conversationId,
+        'is_read': true,
+      });
+      await supabase.from('conversations').update({
+        'last_message': text,
+        'last_message_time': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', widget.conversationId);
+    } catch (e) {
+      debugPrint('Failed to log call: $e');
+    }
   }
 
   String _formatTime(int seconds) {
@@ -65,60 +133,47 @@ class _CallScreenState extends State<CallScreen> {
     return '$minutes:$secs';
   }
 
-  Future<void> _endCall() async {
-    _timer?.cancel();
-    setState(() => _isEnded = true);
-    await CallService.endCall();
-    
-    // Log the call in the chat
-    if (_isConnected) {
-      // Insert a call message into Supabase
-      try {
-        final supabase = Supabase.instance.client;
-        final userId = supabase.auth.currentUser!.id;
-        
-        String callDuration = _formatTime(_secondsElapsed);
-        // Check if I am the caller or receiver to format the message correctly
-        // Since this is a simple implementation, we assume the current user is the caller for this screen
-        String callText = "📞 Outgoing call (Duration: $callDuration)";
-        
-        await supabase.from('messages').insert({
-          'sender_id': userId,
-          'content': callText,
-          'is_image': false,
-          'conversation_id': widget.conversationId,
-          'is_read': true, // Call logs are read by default
-        });
-
-        await supabase.from('conversations').update({
-          'last_message': callText,
-          'last_message_time': DateTime.now().toUtc().toIso8601String(),
-        }).eq('id', widget.conversationId);
-
-      } catch (e) {
-        debugPrint("Failed to log call: $e");
+  String _statusText(CallPhase phase, bool closing) {
+    if (closing) {
+      switch (CallService.lastEndReason) {
+        case 'declined': return 'Call declined';
+        case 'missed': return 'No answer';
+        case 'failed': return 'Call failed';
+        default: return 'Call ended';
       }
     }
+    switch (phase) {
+      case CallPhase.calling: return 'Calling…';
+      case CallPhase.connecting: return 'Connecting…';
+      case CallPhase.connected: return _formatTime(_secondsElapsed);
+      case CallPhase.idle: return _isIncoming ? 'Connecting…' : 'Calling…';
+    }
+  }
 
-    if (mounted) Navigator.pop(context);
+  Future<void> _endPressed() async {
+    await CallService.endCall(reason: 'ended');
+    // endCall returns to idle, which triggers _finish via the listener.
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _ticker?.cancel();
+    CallService.phase.removeListener(_onPhaseChanged);
+    CallService.connectedAtMs.removeListener(_onConnectedChanged);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final phase = CallService.phase.value;
+    final connected = phase == CallPhase.connected;
+    final name = widget.receiverName;
+
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [
-              Color(0xFFFF80AB), // Pink
-              Color(0xFFC51162), // Deep Pink/Magenta
-            ],
+            colors: [Color(0xFFFF80AB), Color(0xFFC51162)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -127,76 +182,39 @@ class _CallScreenState extends State<CallScreen> {
           child: Column(
             children: [
               const SizedBox(height: 40),
-              
-              // Status Text
               Text(
-                _isConnected ? _formatTime(_secondsElapsed) : '$_status...',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 28,
-                  fontWeight: FontWeight.w300,
-                  letterSpacing: 2,
-                ),
+                _statusText(phase, _closing),
+                style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w300, letterSpacing: 2),
               ),
-              
               const SizedBox(height: 60),
-              
-              // Big Profile Circle
-              Center(
-                child: Container(
-                  width: 160,
-                  height: 160,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 4),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.2),
-                        blurRadius: 30,
-                        spreadRadius: 10,
-                      ),
-                    ],
-                  ),
-                  child: Center(
-                    child: Text(
-                      widget.receiverName.isNotEmpty ? widget.receiverName[0].toUpperCase() : '?',
-                      style: const TextStyle(color: Colors.white, fontSize: 64, fontWeight: FontWeight.bold),
-                    ),
+              Container(
+                width: 160,
+                height: 160,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 4),
+                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 30, spreadRadius: 10)],
+                ),
+                child: Center(
+                  child: Text(
+                    name.isNotEmpty ? name[0].toUpperCase() : '?',
+                    style: const TextStyle(color: Colors.white, fontSize: 64, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
-              
               const SizedBox(height: 40),
-              
-              // Receiver Name
-              Text(
-                widget.receiverName,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              
+              Text(name, style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
               const Spacer(),
-              
-              // Calling Dots Animation (Only show if not connected)
-              if (!_isEnded && !_isConnected) const AnimatedCallingDots(),
-              
+              if (!connected && !_closing) const AnimatedCallingDots(),
               const Spacer(),
-              
-              // End Call Button
               Padding(
                 padding: const EdgeInsets.only(bottom: 50),
                 child: GestureDetector(
-                  onTap: _endCall,
+                  onTap: _closing ? null : _endPressed,
                   child: Container(
                     width: 70,
                     height: 70,
-                    decoration: const BoxDecoration(
-                      color: Colors.redAccent,
-                      shape: BoxShape.circle,
-                    ),
+                    decoration: const BoxDecoration(color: Colors.redAccent, shape: BoxShape.circle),
                     child: const Icon(Icons.call_end, color: Colors.white, size: 32),
                   ),
                 ),
@@ -217,15 +235,12 @@ class AnimatedCallingDots extends StatefulWidget {
 }
 
 class _AnimatedCallingDotsState extends State<AnimatedCallingDots> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
+  late final AnimationController _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
   }
 
   @override
@@ -243,24 +258,14 @@ class _AnimatedCallingDotsState extends State<AnimatedCallingDots> with SingleTi
         return Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: List.generate(3, (index) {
-            double scale = 1.0;
-            double delay = index * 0.2;
-            double progress = (t - delay) % 1.0;
+            double progress = (t - index * 0.2) % 1.0;
             if (progress < 0) progress += 1.0;
-            scale = 1.0 + (0.8 * (progress < 0.5 ? progress * 2 : (1 - progress) * 2));
-            
+            final scale = 1.0 + (0.8 * (progress < 0.5 ? progress * 2 : (1 - progress) * 2));
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
               child: Transform.scale(
                 scale: scale,
-                child: Container(
-                  width: 12,
-                  height: 12,
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                  ),
-                ),
+                child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
               ),
             );
           }),

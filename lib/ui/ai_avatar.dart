@@ -137,3 +137,6 @@ class _AIAvatarPainter extends CustomPainter {
     return true; // Must be true to rotate the rings, but we reduced the frame rate
   }
 }
+
+
+============================================================

@@ -1,0 +1,276 @@
+============================================================
+ DINOR DATABASE EXPORT 
+============================================================
+
+
+
+--- TABLE: public.calls ---
+  created_at
+
+--- TABLE: storage.s3_multipart_uploads_parts ---
+  size
+  part_number
+  created_at
+
+--- TABLE: storage.buckets_analytics ---
+  type
+  created_at
+  updated_at
+  id
+  deleted_at
+
+--- TABLE: storage.buckets_vectors ---
+  type
+  created_at
+  updated_at
+
+--- TABLE: storage.vector_indexes ---
+  dimension
+  metadata_configuration
+  created_at
+  updated_at
+
+--- TABLE: public.profiles ---
+  id
+  updated_at
+
+--- TABLE: public.messages ---
+  id
+  sender_id
+  is_image
+  created_at
+  conversation_id
+  is_read
+
+--- TABLE: public.otp_codes ---
+  created_at
+
+--- TABLE: public.google_tokens ---
+  id
+
+--- TABLE: public.google_oauth_credentials ---
+  updated_at
+
+--- TABLE: public.email_code_rate_limits ---
+  last_sent_at
+  window_started_at
+  request_count
+
+--- TABLE: public.conversations ---
+  id
+  created_at
+  user1_id
+  user2_id
+  last_message_time
+
+--- TABLE: public.analytics ---
+  id
+  metadata
+  created_at
+
+--- TABLE: public.calls ---
+  id
+  caller_id
+  receiver_id
+  conversation_id
+  offer
+  answer
+  caller_ice
+  receiver_ice
+
+--- TABLE: storage.migrations ---
+  id
+  executed_at
+
+--- TABLE: storage.objects ---
+  id
+  owner
+  created_at
+  updated_at
+  last_accessed_at
+  metadata
+  user_metadata
+  archived_at
+  is_delete_marker
+  is_versioned
+
+--- TABLE: storage.buckets ---
+  owner
+  created_at
+  updated_at
+  public
+  avif_autodetection
+  file_size_limit
+  type
+  lifecycle_configuration
+  lifecycle_configuration_generation
+
+--- TABLE: storage.s3_multipart_uploads ---
+  in_progress_size
+  created_at
+  user_metadata
+  metadata
+
+--- TABLE: storage.s3_multipart_uploads_parts ---
+  id
+
+--- TABLE: public.otp_codes ---
+  code
+
+--- TABLE: storage.migrations ---
+  hash
+
+--- TABLE: storage.s3_multipart_uploads_parts ---
+  bucket_id
+  upload_id
+
+--- TABLE: public.otp_codes ---
+  email
+
+--- TABLE: storage.migrations ---
+  name
+
+--- TABLE: storage.objects ---
+  bucket_id
+  name
+
+--- TABLE: storage.s3_multipart_uploads_parts ---
+  etag
+  owner_id
+  version
+
+--- TABLE: public.profiles ---
+  username
+
+--- TABLE: storage.buckets_analytics ---
+  name
+
+--- TABLE: storage.objects ---
+  path_tokens
+  version
+  owner_id
+
+--- TABLE: public.profiles ---
+  avatar_url
+
+--- TABLE: storage.buckets_analytics ---
+  format
+
+--- TABLE: public.calls ---
+  status
+
+--- TABLE: public.conversations ---
+  last_message
+
+--- TABLE: storage.buckets ---
+  id
+  name
+
+--- TABLE: public.google_tokens ---
+  refresh_token
+
+--- TABLE: public.messages ---
+  content
+
+--- TABLE: storage.buckets_vectors ---
+  id
+
+--- TABLE: public.google_oauth_credentials ---
+  id
+  refresh_token
+
+--- TABLE: public.analytics ---
+  event_type
+
+--- TABLE: storage.buckets ---
+  allowed_mime_types
+  owner_id
+
+--- TABLE: storage.vector_indexes ---
+  id
+
+--- TABLE: storage.buckets ---
+  versioning_status
+
+--- TABLE: storage.vector_indexes ---
+  bucket_id
+
+--- TABLE: storage.s3_multipart_uploads ---
+  id
+
+--- TABLE: storage.vector_indexes ---
+  data_type
+
+--- TABLE: storage.s3_multipart_uploads ---
+  upload_signature
+  bucket_id
+  version
+  owner_id
+
+--- TABLE: public.email_code_rate_limits ---
+  email
+
+--- TABLE: storage.vector_indexes ---
+  distance_metric
+
+--- TABLE: public.messages ---
+  album_id
+  caption
+
+--- TABLE: storage.s3_multipart_uploads_parts ---
+  key
+
+--- TABLE: storage.vector_indexes ---
+  name
+
+--- TABLE: storage.s3_multipart_uploads ---
+  key
+  [POLICY] Auth Upload on objects
+  [POLICY] Public Access on objects
+  [POLICY] Users can update their own profile on profiles
+  [POLICY] Authenticated users can view all profiles on profiles
+  [POLICY] Users can insert their own profile. on profiles
+  [POLICY] Public profiles are viewable by everyone. on profiles
+  [POLICY] Users can update messages in their conversations on messages
+  [POLICY] Users can insert their own messages. on messages
+  [POLICY] Messages are viewable by everyone. on messages
+  [POLICY] Only service role can access OTPs on otp_codes
+  [POLICY] Users can update their own conversations. on conversations
+  [POLICY] Users can insert conversations. on conversations
+  [POLICY] Users can view their own conversations. on conversations
+  [POLICY] Admins can read analytics on analytics
+  [POLICY] Anyone can insert analytics on analytics
+  [POLICY] Users can update calls they are part of on calls
+  [POLICY] Users can create calls on calls
+  [POLICY] Users can see calls involving them on calls
+  [INDEX] migrations_pkey on migrations
+  [INDEX] migrations_name_key on migrations
+  [INDEX] objects_pkey on objects
+  [INDEX] name_prefix_search on objects
+  [INDEX] idx_objects_bucket_id_name on objects
+  [INDEX] idx_objects_bucket_id_name_lower on objects
+  [INDEX] objects_bucket_id_name_version_key on objects
+  [INDEX] idx_objects_current_version on objects
+  [INDEX] idx_objects_delete_markers on objects
+  [INDEX] idx_objects_null_version on objects
+  [INDEX] buckets_pkey on buckets
+  [INDEX] bname on buckets
+  [INDEX] s3_multipart_uploads_pkey on s3_multipart_uploads
+  [INDEX] idx_multipart_uploads_list on s3_multipart_uploads
+  [INDEX] s3_multipart_uploads_parts_pkey on s3_multipart_uploads_parts
+  [INDEX] buckets_analytics_pkey on buckets_analytics
+  [INDEX] buckets_analytics_unique_name_idx on buckets_analytics
+  [INDEX] buckets_vectors_pkey on buckets_vectors
+  [INDEX] vector_indexes_pkey on vector_indexes
+  [INDEX] vector_indexes_name_bucket_id_idx on vector_indexes
+  [INDEX] profiles_pkey on profiles
+  [INDEX] profiles_username_key on profiles
+  [INDEX] messages_pkey on messages
+  [INDEX] otp_codes_pkey on otp_codes
+  [INDEX] google_tokens_pkey on google_tokens
+  [INDEX] google_oauth_credentials_pkey on google_oauth_credentials
+  [INDEX] email_code_rate_limits_pkey on email_code_rate_limits
+  [INDEX] conversations_pkey on conversations
+  [INDEX] analytics_pkey on analytics
+  [INDEX] calls_pkey on calls
+  [BUCKET] chat_media (Public)

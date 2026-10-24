@@ -12,3 +12,6 @@ create policy "Anyone can insert analytics" on public.analytics for insert with 
 
 -- Allow only developers to read (You can change 'authenticated' to specific email if needed)
 create policy "Admins can read analytics" on public.analytics for select to authenticated using (true);
+
+
+============================================================

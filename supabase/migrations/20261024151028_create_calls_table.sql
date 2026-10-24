@@ -27,3 +27,6 @@ on public.calls for update
 using (auth.uid() = caller_id or auth.uid() = receiver_id);
 
 alter publication supabase_realtime add table public.calls;
+
+
+============================================================

@@ -10,6 +10,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../ffi/dinor_bindings.dart';
 import '../chat/ai_service.dart';
 import '../chat/message_cache.dart';
+import '../chat/call_service.dart';
 import '../chat/chat_service.dart';
 import 'ai_avatar.dart';
 import 'media_picker.dart';
@@ -78,115 +79,158 @@ class _ChatScreenState extends State<ChatScreen> {
       _messages.add(Message('ai_1', "Hello! I am Dinor AI. Ask me anything and I'll search the web.", false));
       _isLoadingMessages = false;
     } else {
-      // 1. INSTANT LOAD: Check if we have cached messages
-      if (widget.conversationId != null) {
-        final cached = MessageCache.getMessages(widget.conversationId!);
-        if (cached != null && cached.isNotEmpty) {
-          _messages.addAll(cached);
-          _isLoadingMessages = false; // Turn off skeleton immediately
-        }
+      _currentUserId = supabase.auth.currentUser?.id;
+      _resolvedConversationId = widget.conversationId;
+      _loadChat();
+    }
+  }
+
+  Message _rowToMessage(Map<String, dynamic> row) => Message(
+        row['id'].toString(),
+        (row['content'] ?? '').toString(),
+        row['sender_id'] == _currentUserId,
+        isImage: row['is_image'] ?? false,
+        isRead: row['is_read'] ?? false,
+        albumId: row['album_id'] as String?,
+        caption: row['caption'] as String?,
+      );
+
+  /// Opens the chat: paints cached messages at once, then reconciles with the server.
+  Future<void> _loadChat() async {
+    // 1. Instant paint from the local cache (skeleton only when there is no history).
+    final knownId = widget.conversationId;
+    if (knownId != null) {
+      final cached = await LocalCache.loadMessages(knownId);
+      if (mounted && cached != null && cached.isNotEmpty) {
+        setState(() {
+          _messages
+            ..clear()
+            ..addAll(cached.map(_rowToMessage));
+          _isLoadingMessages = false;
+        });
+        _scrollToBottom();
       }
-      
-      // 2. BACKGROUND FETCH: Connect to Supabase and update
-      _initSupabaseChat();
-    }
-  }
-
-  Future<void> _initSupabaseChat() async {
-    _currentUserId = supabase.auth.currentUser?.id;
-    
-    // If we don't have a conversation ID yet (new chat), create it
-    if (_resolvedConversationId == null && widget.otherUserId != null) {
-      final newId = await ChatService.getOrCreateConversation(widget.otherUserId!);
-      // We can't update the widget's final field, so we'll use a local state variable
-      _resolvedConversationId = newId;
-    } else {
-      _resolvedConversationId = _resolvedConversationId;
     }
 
-    if (_resolvedConversationId != null) {
-      ChatService.markAsRead(_resolvedConversationId!);
-    }
-    
-    _fetchMessages();
-
-    _chatChannel = supabase.channel('public:messages')
-      .onPostgresChanges(
-        event: PostgresChangeEvent.insert,
-        schema: 'public',
-        table: 'messages',
-        callback: (payload) {
-          final newMsg = payload.newRecord;
-          if (mounted && newMsg['conversation_id'] == _resolvedConversationId) {
-            final exists = _messages.any((m) => m.id == newMsg['id'].toString());
-            if (!exists) {
-              setState(() {
-                _messages.add(Message(
-                  newMsg['id'].toString(),
-                  newMsg['content'],
-                  newMsg['sender_id'] == _currentUserId,
-                  isImage: newMsg['is_image'] ?? false,
-                  isRead: newMsg['is_read'] ?? false,
-                  albumId: newMsg['album_id'],
-                  caption: newMsg['caption'],
-                ));
-              });
-              _scrollToBottom();
-              
-              // Update cache
-              if (_resolvedConversationId != null) {
-                MessageCache.saveMessages(_resolvedConversationId!, _messages);
-              }
-            }
-          }
-        }
-      ).subscribe();
-  }
-
-  Future<void> _fetchMessages() async {
+    // 2. New chats only know the other user's id; resolve the conversation.
     if (_resolvedConversationId == null) {
-       // If it's a new chat, create the conversation in the background
-       if (widget.otherUserId != null) {
-         final newId = await ChatService.getOrCreateConversation(widget.otherUserId!);
-         _resolvedConversationId = newId;
-         // Now that we have an ID, we can start listening
-         _initSupabaseChat(); 
-       }
-       setState(() => _isLoadingMessages = false);
-       return;
-    }
-    try {
-      final data = await supabase.from('messages').select().eq('conversation_id', _resolvedConversationId ?? '').order('created_at', ascending: true);
-      setState(() {
-        _messages.clear();
-        for (var row in data) {
-          _messages.add(Message(
-            row['id'].toString(),
-            row['content'],
-            row['sender_id'] == _currentUserId,
-            isImage: row['is_image'] ?? false,
-            isRead: row['is_read'] ?? false,
-            albumId: row['album_id'],
-            caption: row['caption'],
-          ));
-        }
-      });
-      _scrollToBottom();
-      
-      // 3. SAVE TO CACHE: Update the memory cache with fresh data
-      if (_resolvedConversationId != null) {
-        MessageCache.saveMessages(_resolvedConversationId!, _messages);
+      if (widget.otherUserId == null) {
+        if (mounted) setState(() => _isLoadingMessages = false);
+        return;
       }
-      
+      try {
+        _resolvedConversationId = await ChatService.getOrCreateConversation(widget.otherUserId!);
+      } catch (e) {
+        debugPrint('Could not open conversation: $e');
+        if (mounted) setState(() => _isLoadingMessages = false);
+        return;
+      }
+    }
+    final convId = _resolvedConversationId!;
+
+    // 3. Subscribe first, then fetch, so no message can slip between the two.
+    _subscribeRealtime(convId);
+    await _fetchMessages();
+    ChatService.markAsRead(convId);
+  }
+
+  /// Realtime inserts for this conversation only (filtered on the server).
+  void _subscribeRealtime(String convId) {
+    _chatChannel?.unsubscribe();
+    _chatChannel = supabase.channel('chat:$convId').onPostgresChanges(
+      event: PostgresChangeEvent.insert,
+      schema: 'public',
+      table: 'messages',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'conversation_id',
+        value: convId,
+      ),
+      callback: (payload) {
+        if (mounted) _ingest(payload.newRecord);
+      },
+    ).subscribe();
+  }
+
+  /// Adds a server row exactly once. When our own message echoes back over
+  /// realtime, it replaces the pending bubble instead of appearing twice.
+  void _ingest(Map<String, dynamic> row) {
+    final id = row['id'].toString();
+    if (_messages.any((m) => m.id == id)) return;
+
+    final mine = row['sender_id'] == _currentUserId;
+    final isImage = row['is_image'] ?? false;
+    final incoming = _rowToMessage(row);
+
+    setState(() {
+      if (mine) {
+        final pending = _messages.indexWhere((m) =>
+            m.id.startsWith('temp_') && m.status == MessageStatus.sending && m.isMe && m.isImage == isImage);
+        if (pending != -1) {
+          _messages[pending] = incoming;
+          return;
+        }
+      }
+      _messages.add(incoming);
+    });
+    _scrollToBottom();
+    _persist();
+  }
+
+  /// Merges the server history with any bubbles still sending or failed.
+  Future<void> _fetchMessages() async {
+    final convId = _resolvedConversationId;
+    if (convId == null) return;
+    try {
+      final data = await supabase
+          .from('messages')
+          .select()
+          .eq('conversation_id', convId)
+          .order('created_at', ascending: true);
+      if (!mounted) return;
+
+      final server = List<Map<String, dynamic>>.from(data).map(_rowToMessage).toList();
+      final serverIds = server.map((m) => m.id).toSet();
+      final localPending = _messages.where((m) => m.id.startsWith('temp_') && !serverIds.contains(m.id)).toList();
+
+      setState(() {
+        _messages
+          ..clear()
+          ..addAll(server)
+          ..addAll(localPending);
+      });
+      _persist();
+      _scrollToBottom();
     } catch (e) {
-      debugPrint("Error fetching messages: $e");
+      debugPrint('Error fetching messages: $e');
     } finally {
       if (mounted) setState(() => _isLoadingMessages = false);
     }
   }
 
+  /// Saves confirmed messages to the local cache (never pending or AI bubbles).
+  void _persist() {
+    final convId = _resolvedConversationId;
+    if (convId == null || widget.isAi) return;
+    final rows = _messages
+        .where((m) => !m.id.startsWith('temp_') && m.id != 'ai_1')
+        .map((m) => <String, dynamic>{
+              'id': m.id,
+              'content': m.text,
+              'sender_id': m.isMe ? _currentUserId : 'other',
+              'is_image': m.isImage,
+              'is_read': m.isRead,
+              'album_id': m.albumId,
+              'caption': m.caption,
+            })
+        .toList();
+    LocalCache.saveMessages(convId, rows);
+  }
+
   @override
   void dispose() {
+    _menuOverlay?.remove();
+    _menuOverlay = null;
     _chatChannel?.unsubscribe();
     _textController.dispose();
     _scrollController.dispose();
@@ -197,67 +241,66 @@ class _ChatScreenState extends State<ChatScreen> {
     final rawText = customText ?? _textController.text.trim();
     if (rawText.isEmpty) return;
 
-    String text = rawText;
-    try {
-      final core = DinorCore.load();
-      text = core.batchSanitize(rawText);
-    } catch (e) {
-      debugPrint("C++ Sanitize failed: $e");
-    }
+    // Sanitize in C++ (singleton core; Dart fallback if unavailable).
+    final text = DinorCore.load().batchSanitize(rawText);
+    if (text.isEmpty) return;
 
     if (customText == null) _textController.clear();
 
     if (widget.isAi) {
-      setState(() => _messages.add(Message(DateTime.now().toString(), text, true)));
+      setState(() => _messages.add(Message(DateTime.now().microsecondsSinceEpoch.toString(), text, true)));
       _scrollToBottom();
       _triggerAiResponse(text);
       return;
     }
 
-    if (_currentUserId == null) return;
+    final me = _currentUserId;
+    final convId = _resolvedConversationId;
+    if (me == null || convId == null) return;
 
-    int cppTime = 0;
-    try { cppTime = DinorCore.load().getFastTimestamp(); } catch (_) {}
-    final tempId = 'temp_$cppTime';
-
-    setState(() {
-      _messages.add(Message(tempId, text, true, status: MessageStatus.sending));
-    });
+    final tempId = 'temp_${DateTime.now().microsecondsSinceEpoch}';
+    setState(() => _messages.add(Message(tempId, text, true, status: MessageStatus.sending)));
     _scrollToBottom();
 
     try {
       final response = await supabase.from('messages').insert({
-        'sender_id': _currentUserId,
+        'sender_id': me,
         'content': text,
         'is_image': false,
-        'conversation_id': _resolvedConversationId,
+        'conversation_id': convId,
         'is_read': false,
       }).select('id').single();
 
-      setState(() {
-        final index = _messages.indexWhere((m) => m.id == tempId);
-        if (index != -1) {
-          _messages[index] = Message(response['id'].toString(), text, true, isRead: false, status: MessageStatus.sent);
-        }
-      });
-      
-      // Update cache instantly
-      if (_resolvedConversationId != null) {
-        MessageCache.saveMessages(_resolvedConversationId!, _messages);
+      final realId = response['id'].toString();
+      if (mounted) {
+        setState(() {
+          final i = _messages.indexWhere((m) => m.id == tempId);
+          if (i != -1) {
+            if (_messages.any((m) => m.id == realId)) {
+              _messages.removeAt(i); // realtime already added the real row
+            } else {
+              _messages[i] = Message(realId, text, true, status: MessageStatus.sent);
+            }
+          }
+        });
+        _persist();
       }
 
-      await supabase.from('conversations').update({
-        'last_message': text,
-        'last_message_time': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', _resolvedConversationId!);
-
+      try {
+        await supabase.from('conversations').update({
+          'last_message': text,
+          'last_message_time': DateTime.now().toUtc().toIso8601String(),
+        }).eq('id', convId);
+      } catch (e) {
+        debugPrint('Could not update conversation preview: $e');
+      }
     } catch (e) {
-      debugPrint("Failed to send: $e");
+      debugPrint('Failed to send: $e');
+      if (!mounted) return;
       setState(() {
-        final index = _messages.indexWhere((m) => m.id == tempId);
-        if (index != -1) {
-          _messages[index] = Message(tempId, "Failed to send", true, status: MessageStatus.failed);
-        }
+        final i = _messages.indexWhere((m) => m.id == tempId);
+        // Keep the user's text so nothing is lost; the bubble shows the failed state.
+        if (i != -1) _messages[i] = Message(tempId, text, true, status: MessageStatus.failed);
       });
     }
   }
@@ -281,7 +324,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _scrollToBottom() {
     Future.delayed(const Duration(milliseconds: 100), () {
-      if (_scrollController.hasClients) {
+      if (mounted && _scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
           duration: const Duration(milliseconds: 300),
@@ -421,25 +464,24 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _deleteMessage(Message msg) {
-    List<Message> toDelete = [];
-    if (msg.albumId != null) {
-      toDelete = _messages.where((m) => m.albumId == msg.albumId).toList();
-    } else {
-      toDelete = [msg];
-    }
+    final List<Message> toDelete = msg.albumId != null
+        ? _messages.where((m) => m.albumId == msg.albumId).toList()
+        : [msg];
 
     setState(() {
       _messages.removeWhere((m) => toDelete.any((d) => d.id == m.id));
     });
+    _persist();
 
+    final convId = _resolvedConversationId;
     for (var m in toDelete) {
-      if (!m.id.startsWith('temp_')) {
-        supabase.from('messages').delete().eq('id', m.id).then((_) {
-          debugPrint("Deleted message ${m.id} from Supabase");
-        }).catchError((e) {
-          debugPrint("Failed to delete message ${m.id}: $e");
-        });
-      }
+      if (m.id.startsWith('temp_')) continue;
+      supabase.from('messages').delete().eq('id', m.id).then((_) {
+        debugPrint("Deleted message ${m.id} from Supabase");
+      }).catchError((e) {
+        debugPrint("Failed to delete message ${m.id}: $e");
+      });
+      if (convId != null) LocalCache.removeMessage(convId, m.id);
     }
   }
 
@@ -755,7 +797,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         radius: 18,
                         backgroundColor: brandBlue.withValues(alpha: 0.2),
                         child: Text(
-                          widget.title[0],
+                          widget.title.isNotEmpty ? widget.title[0] : '?',
                           style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold, fontSize: 16),
                         ),
                       ),
@@ -786,6 +828,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         icon: const Icon(Icons.call, color: Colors.white, size: 22),
                         onPressed: () {
                           if (_resolvedConversationId != null && widget.otherUserId != null) {
+                            if (CallService.phase.value != CallPhase.idle) return;
                             Navigator.push(
                               context,
                               PageRouteBuilder(
@@ -1238,3 +1281,6 @@ class _AnimatedSendingDotsState extends State<_AnimatedSendingDots> with SingleT
     );
   }
 }
+
+
+============================================================

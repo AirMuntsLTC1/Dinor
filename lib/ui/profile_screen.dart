@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../chat/call_service.dart';
+import '../chat/message_cache.dart';
 import 'dinor_theme.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -20,6 +22,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _signOut() async {
+    // Stop per-user listeners and wipe local data before signing out,
+    // so the next account on this device never sees the previous user's cache.
+    CallService.stopIncomingListener();
+    await LocalCache.clearAll();
     await supabase.auth.signOut();
     // The AuthGate in main.dart will automatically redirect to LoginScreen
   }
@@ -155,3 +161,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 }
+
+
+============================================================

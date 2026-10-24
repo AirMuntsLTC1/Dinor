@@ -1,7 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../chat/chat_service.dart';
+import '../chat/call_service.dart';
+import '../chat/message_cache.dart';
+import 'call_screen.dart';
+import 'skeleton_loader.dart';
 import 'chat_screen.dart';
 import 'ai_avatar.dart';
 import 'bottom_nav.dart';
@@ -20,37 +26,75 @@ class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
   int _drawerPage = 0;
   final supabase = Supabase.instance.client;
-  
+
   List<Map<String, dynamic>> _conversations = [];
   List<Map<String, dynamic>> _searchResults = [];
   bool _isSearching = false;
-  bool _isLoading = true; // Startup loading state
+  bool _isLoading = true; // true only when there is no cached list to show
   final FocusNode _searchFocus = FocusNode();
+
+  RealtimeChannel? _convChannel;
+  Timer? _refreshDebounce;
+  Timer? _searchDebounce;
+  int _fetchSeq = 0;   // drops out-of-order conversation responses
+  int _searchSeq = 0;  // drops out-of-order search responses
+  bool _incomingDialogOpen = false;
 
   @override
   void initState() {
     super.initState();
+
+    // 1. Paint instantly from the local cache (no spinner on startup).
+    final cached = LocalCache.peekConversations();
+    if (cached != null) {
+      _conversations = cached;
+      _isLoading = false;
+    }
+
+    // 2. Refresh from the network in the background.
     _fetchConversations();
-    
-    // Listen to realtime updates
-    supabase.channel('public:conversations_refresh')
-      .onPostgresChanges(
-        event: PostgresChangeEvent.all,
-        schema: 'public',
-        table: 'conversations',
-        callback: (payload) => _fetchConversations(),
-      ).subscribe();
+
+    // 3. Realtime updates, debounced so bursts trigger one refresh.
+    _subscribeRealtime();
+
+    // 4. Calls addressed to this user.
+    CallService.startIncomingListener();
+    CallService.incoming.addListener(_onIncomingCall);
+  }
+
+  void _subscribeRealtime() {
+    final me = supabase.auth.currentUser?.id;
+    if (me == null) return;
+    _convChannel?.unsubscribe();
+    _convChannel = supabase.channel('conversations:$me').onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'conversations',
+      callback: (_) => _scheduleRefresh(),
+    ).subscribe();
+  }
+
+  void _scheduleRefresh() {
+    _refreshDebounce?.cancel();
+    _refreshDebounce = Timer(const Duration(milliseconds: 300), _fetchConversations);
   }
 
   @override
   void dispose() {
+    _refreshDebounce?.cancel();
+    _searchDebounce?.cancel();
+    _convChannel?.unsubscribe();
+    CallService.incoming.removeListener(_onIncomingCall);
     _searchFocus.dispose();
     super.dispose();
   }
 
   Future<void> _fetchConversations() async {
+    final seq = ++_fetchSeq;
     try {
       final data = await ChatService.getMyConversations();
+      if (seq != _fetchSeq) return; // a newer fetch is already in flight
+      LocalCache.saveConversations(data); // fire-and-forget persistence
       if (mounted) {
         setState(() {
           _conversations = data;
@@ -58,56 +102,103 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     } catch (e) {
-      debugPrint("Error fetching conversations: $e");
+      debugPrint('Error fetching conversations: $e');
+      // Keep showing cached data on failure; only stop the skeleton.
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  void _onSearchChanged(String query) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 250), () => _searchUsers(query));
+  }
+
   Future<void> _searchUsers(String query) async {
-    if (query.isEmpty) {
-      setState(() { _isSearching = false; _searchResults = []; });
+    final seq = ++_searchSeq;
+    if (query.trim().isEmpty) {
+      if (mounted) setState(() { _isSearching = false; _searchResults = []; });
       return;
     }
-    setState(() => _isSearching = true);
+    if (mounted) setState(() => _isSearching = true);
     try {
       final results = await ChatService.searchUsers(query);
-      setState(() => _searchResults = results);
+      if (seq == _searchSeq && mounted) setState(() => _searchResults = results);
     } catch (e) {
-      debugPrint("Search error: $e");
-      setState(() => _searchResults = []);
+      debugPrint('Search error: $e');
+      if (seq == _searchSeq && mounted) setState(() => _searchResults = []);
     }
   }
 
+  String _initial(String? name) =>
+      (name != null && name.isNotEmpty) ? name[0].toUpperCase() : '?';
+
   Future<void> _openChat(String otherUserId, String name) async {
     _searchFocus.unfocus();
-    
-    // 1. Find the conversation ID
-    final convId = await ChatService.getOrCreateConversation(otherUserId);
-    
-    if (mounted) {
-      // 2. Clear unread count locally INSTANTLY in the UI before we even open the chat
-      setState(() {
-        for (var conv in _conversations) {
-          if (conv['id'] == convId) {
-            conv['unread_count'] = 0;
-            conv['latest_unread'] = null;
-          }
-        }
-      });
 
-      // 3. Open the chat
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ChatScreen(title: name, conversationId: convId, otherUserId: otherUserId),
-        ),
-      ).then((_) {
-        // 4. When returning from the chat, wait a tiny bit for Supabase to sync, then refresh
-        Future.delayed(const Duration(milliseconds: 500), () {
-          _fetchConversations(); 
-        });
-      });
+    String convId;
+    try {
+      convId = await ChatService.getOrCreateConversation(otherUserId);
+    } catch (e) {
+      debugPrint('Could not open chat: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Couldn't open chat. Try again.")));
+      }
+      return;
     }
+
+    if (!mounted) return;
+    // Clear the unread badge instantly; the list refreshes when the chat closes.
+    setState(() {
+      for (var conv in _conversations) {
+        if (conv['id'] == convId) {
+          conv['unread_count'] = 0;
+          conv['latest_unread'] = null;
+        }
+      }
+    });
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChatScreen(title: name, conversationId: convId, otherUserId: otherUserId),
+      ),
+    ).then((_) => _scheduleRefresh());
+  }
+
+  void _onIncomingCall() {
+    final call = CallService.incoming.value;
+    if (call == null || _incomingDialogOpen || !mounted) return;
+    _incomingDialogOpen = true;
+    showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: DinorTheme.surfaceDark,
+        title: const Text('Incoming call', style: TextStyle(color: Colors.white)),
+        content: Text('${call.callerName} is calling you', style: const TextStyle(color: DinorTheme.textGrey)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Decline', style: TextStyle(color: Colors.redAccent))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Answer', style: TextStyle(color: DinorTheme.brandBlue))),
+        ],
+      ),
+    ).then((accepted) {
+      _incomingDialogOpen = false;
+      if (accepted == true && mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CallScreen(
+              receiverName: call.callerName,
+              receiverId: call.callerId,
+              conversationId: call.conversationId,
+              incomingCallId: call.callId,
+            ),
+          ),
+        );
+      } else {
+        CallService.declineCall(call.callId);
+      }
+    });
   }
 
   @override
@@ -148,7 +239,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: TextField(
                   focusNode: _searchFocus,
                   autofocus: false,
-                  onChanged: _searchUsers,
+                  onChanged: _onSearchChanged,
                   style: const TextStyle(color: Colors.white),
                   decoration: const InputDecoration(hintText: 'Search users...', hintStyle: TextStyle(color: DinorTheme.textGrey), prefixIcon: Icon(Icons.search, color: DinorTheme.textGrey), border: InputBorder.none, contentPadding: EdgeInsets.symmetric(vertical: 14)),
                 ),
@@ -183,7 +274,7 @@ class _HomeScreenState extends State<HomeScreen> {
             // Loading / Chat List
             Expanded(
               child: _isLoading 
-                ? const Center(child: CircularProgressIndicator(color: brandBlue))
+                ? const ConversationListSkeleton()
                 : ListView.separated(
                 itemCount: _isSearching ? _searchResults.length : _conversations.length,
                 separatorBuilder: (context, index) => const SizedBox(height: 4),
@@ -191,8 +282,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   if (_isSearching) {
                     final user = _searchResults[index];
                     return ListTile(
-                      leading: CircleAvatar(backgroundColor: brandBlue, child: Text(user['username'][0].toUpperCase())),
-                      title: Text(user['username'], style: const TextStyle(color: Colors.white)),
+                      leading: CircleAvatar(backgroundColor: brandBlue, child: Text(_initial(user['username'] as String?))),
+                      title: Text((user['username'] ?? '') as String, style: const TextStyle(color: Colors.white)),
                       onTap: () => _openChat(user['id'], user['username']),
                     );
                   } else {
@@ -210,7 +301,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: ListTile(
                         hoverColor: Colors.transparent, splashColor: Colors.transparent, focusColor: Colors.transparent,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        leading: CircleAvatar(backgroundColor: brandBlue.withValues(alpha: 0.15), child: Text(otherName[0].toUpperCase(), style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold))),
+                        leading: CircleAvatar(backgroundColor: brandBlue.withValues(alpha: 0.15), child: Text(_initial(otherName), style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold))),
                         title: Text(otherName, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
                         subtitle: Text(
                           conv['last_message'] ?? 'No messages yet', 
@@ -285,3 +376,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
+
+
+============================================================

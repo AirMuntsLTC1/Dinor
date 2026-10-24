@@ -11,3 +11,6 @@ with check (
   bucket_id = 'chat_media' 
   AND auth.role() = 'authenticated'
 );
+
+
+============================================================
