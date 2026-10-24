@@ -9,6 +9,7 @@ import 'package:photo_manager/photo_manager.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../ffi/dinor_bindings.dart';
 import '../chat/ai_service.dart';
+import '../chat/call_service.dart';
 import '../chat/chat_service.dart';
 import 'ai_avatar.dart';
 import 'media_picker.dart';
@@ -746,6 +747,20 @@ class _ChatScreenState extends State<ChatScreen> {
                         ],
                       ),
                     ),
+                    
+                    // Call Icon
+                    if (!widget.isAi && widget.otherUserId != null && _selectedMessage == null)
+                      IconButton(
+                        icon: const Icon(Icons.call, color: Colors.white, size: 22),
+                        onPressed: () async {
+                          if (_resolvedConversationId != null && widget.otherUserId != null) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Calling...')));
+                            await CallService.startCall(widget.otherUserId!, _resolvedConversationId!);
+                          }
+                        },
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
                   ],
                 ),
               ),
