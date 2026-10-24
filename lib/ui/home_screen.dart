@@ -4,9 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../chat/chat_service.dart';
-import '../chat/call_service.dart';
 import '../chat/message_cache.dart';
-import 'call_screen.dart';
 import 'skeleton_loader.dart';
 import 'chat_screen.dart';
 import 'ai_avatar.dart';
@@ -61,9 +59,6 @@ class _HomeScreenState extends State<HomeScreen> {
     // Fallback: refresh the chat list regularly, in case Realtime lags.
     _homePoll = Timer.periodic(const Duration(seconds: 6), (_) => _scheduleRefresh());
 
-    // 4. Calls addressed to this user.
-    CallService.startIncomingListener();
-    CallService.incoming.addListener(_onIncomingCall);
   }
 
   void _subscribeRealtime() {
@@ -89,7 +84,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _searchDebounce?.cancel();
     _homePoll?.cancel();
     _convChannel?.unsubscribe();
-    CallService.incoming.removeListener(_onIncomingCall);
     _searchFocus.dispose();
     super.dispose();
   }
@@ -171,58 +165,6 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (context) => ChatScreen(title: name, conversationId: convId, otherUserId: otherUserId),
       ),
     ).then((_) => _scheduleRefresh());
-  }
-
-  void _onIncomingCall() {
-    final call = CallService.incoming.value;
-    if (!mounted) return;
-
-    if (call == null) {
-      // Caller hung up, or the call was answered elsewhere: close the prompt.
-      if (_incomingDialogOpen && _dialogContext != null) {
-        try {
-          Navigator.of(_dialogContext!).pop(); // null result: no decline sent
-        } catch (_) {}
-      }
-      return;
-    }
-    if (_incomingDialogOpen) return;
-    _incomingDialogOpen = true;
-
-    showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        _dialogContext = ctx;
-        return AlertDialog(
-          backgroundColor: DinorTheme.surfaceDark,
-          title: const Text('Incoming call', style: TextStyle(color: Colors.white)),
-          content: Text('${call.callerName} is calling you', style: const TextStyle(color: DinorTheme.textGrey)),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Decline', style: TextStyle(color: Colors.redAccent))),
-            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Answer', style: TextStyle(color: DinorTheme.brandBlue))),
-          ],
-        );
-      },
-    ).then((accepted) {
-      _incomingDialogOpen = false;
-      _dialogContext = null;
-      if (accepted == true && mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => CallScreen(
-              receiverName: call.callerName,
-              receiverId: call.callerId,
-              conversationId: call.conversationId,
-              incomingCallId: call.callId,
-            ),
-          ),
-        );
-      } else if (accepted == false) {
-        CallService.declineCall(call.callId);
-      }
-    });
   }
 
   @override

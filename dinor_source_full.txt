@@ -4405,15 +4405,12 @@ class _CallScreenState extends State<CallScreen> {
     // endCall returns to idle, which triggers _finish via the listener.
   }
 
-  @override
+@override
   void dispose() {
     _ticker?.cancel();
     CallService.phase.removeListener(_onPhaseChanged);
     CallService.connectedAtMs.removeListener(_onConnectedChanged);
-    // Leaving this screen must never leave the microphone open.
-    if (CallService.phase.value != CallPhase.idle) {
-      CallService.endCall(reason: 'ended');
-    }
+    CallService.endCall(reason: 'ended');
     super.dispose();
   }
 
@@ -4720,7 +4717,24 @@ class CallService {
 
   static SupabaseClient get _db => Supabase.instance.client;
 
+/// How long to ring before giving up (caller side, callee never answered).
   static const Duration _ringTimeout = Duration(seconds: 45);
+
+  /// After the callee answers, how long to wait for WebRTC to reach 'connected'
+  /// before declaring failure. Covers "answered but network broken".
+  static const Duration _connectTimeout = Duration(seconds: 15);
+
+  /// If the peer disconnects mid-call (network blip), how long to hold on
+  /// before ending. Messenger/WhatsApp give ~8s of grace.
+  static const Duration _reconnectGrace = Duration(seconds: 8);
+
+  /// Hard safety cap: stop the ringtone if 'stop' was never called
+  /// (app crash, process kill, exception in the stop path).
+  static const Duration _ringSafetyTimeout = Duration(seconds: 60);
+
+  /// Incoming ring expires after this even if the Realtime 'ended' update
+  /// never arrives (network glitch on the DB update).
+  static const Duration _incomingExpiry = Duration(seconds: 30);
   static const MethodChannel _ringChannel = MethodChannel('dinor/ring');
   static const Map<String, dynamic> _rtcConfig = {
     'iceServers': [
@@ -4753,6 +4767,10 @@ class CallService {
 
   static Future<void> _iceWriteChain = Future.value();
   static Timer? _ringTimer;
+static Timer? _connectTimer;
+  static Timer? _reconnectTimer;
+  static Timer? _ringSafetyTimer;
+  static Timer? _incomingExpiryTimer;
   static Timer? _callPoll;
   static Timer? _incomingPoll;
   static final Set<String> _seenCallIds = {};
@@ -4763,11 +4781,21 @@ class CallService {
   // Ringing (native ringtone + vibration; silently skipped where unavailable)
   // ---------------------------------------------------------------------------
 
-  static Future<void> _ring(bool on) async {
+static Future<void> _ring(bool on) async {
     try {
       await _ringChannel.invokeMethod(on ? 'start' : 'stop');
     } catch (_) {
       // Not available on this platform: the on-screen prompt still shows.
+    }
+    // Safety: if 'stop' never arrives (crash, exception), force-stop.
+    if (on) {
+      _ringSafetyTimer?.cancel();
+      _ringSafetyTimer = Timer(_ringSafetyTimeout, () {
+        try { _ringChannel.invokeMethod('stop'); } catch (_) {}
+      });
+    } else {
+      _ringSafetyTimer?.cancel();
+      _ringSafetyTimer = null;
     }
   }
 
@@ -4867,6 +4895,17 @@ class CallService {
     _ring(false);
   }
 
+static void _armIncomingExpiry(String callId) {
+    _incomingExpiryTimer?.cancel();
+    _incomingExpiryTimer = Timer(_incomingExpiry, () {
+      final current = incoming.value;
+      if (current != null && current.callId == callId) {
+        _clearIncoming();
+        _declineRow(callId);
+      }
+    });
+  }
+
   static Future<void> _onIncomingRow(Map<String, dynamic> row) async {
     if (row['status'] != 'ringing') return;
     // Realtime and polling can both report the same call: handle it once.
@@ -4896,6 +4935,7 @@ class CallService {
       conversationId: row['conversation_id'].toString(),
       callerName: name,
     );
+    _armIncomingExpiry(row['id'].toString());
   }
 
   /// Closes the prompt when the caller cancels or the call is answered elsewhere.
@@ -4946,9 +4986,19 @@ class CallService {
         'offer': {'sdp': offer.sdp, 'type': offer.type},
       }).eq('id', _callId!);
 
+// If the callee answers but WebRTC never connects (NAT/firewall),
+      // fail fast instead of leaving the user staring at "Connecting...".
+      _connectTimer?.cancel();
+      _connectTimer = Timer(_connectTimeout, () {
+        if (phase.value == CallPhase.calling || phase.value == CallPhase.connecting) {
+          lastErrorMessage = 'Could not connect. Your network may block direct calls.';
+          endCall(reason: 'failed');
+        }
+      });
+
+      // Total ring cap: if the callee never answers, end it.
       _subscribe();
       _startCallPoll();
-      // Catch an answer that was written before the subscription went live.
       final current = await _db.from('calls').select().eq('id', _callId!).single();
       await _applyRow(current);
 
@@ -4958,6 +5008,12 @@ class CallService {
     } catch (e) {
       debugPrint('startCall failed: $e');
       lastErrorMessage = _friendly(e);
+      final id = _callId;
+      if (id != null) {
+        try {
+          await _db.from('calls').update({'status': 'ended'}).eq('id', id);
+        } catch (_) {}
+      }
       await _fail();
     }
   }
@@ -4967,8 +5023,8 @@ class CallService {
   // ---------------------------------------------------------------------------
 
   static Future<void> acceptCall(String callId) async {
+    _clearIncoming(); // ALWAYS stop the ringtone first
     if (phase.value != CallPhase.idle) return;
-    _clearIncoming(); // stops the ringtone
     _isCaller = false;
     _callId = callId;
     lastErrorMessage = null;
@@ -4978,7 +5034,6 @@ class CallService {
     try {
       var row = await _db.from('calls').select().eq('id', callId).single();
 
-      // The caller writes the offer just after creating the row, so wait briefly.
       for (var i = 0; row['offer'] == null && i < 30; i++) {
         if (row['status'] == 'ended' || row['status'] == 'declined') {
           throw StateError('The caller hung up.');
@@ -5011,6 +5066,9 @@ class CallService {
     } catch (e) {
       debugPrint('acceptCall failed: $e');
       lastErrorMessage = _friendly(e);
+      try {
+        await _db.from('calls').update({'status': 'ended'}).eq('id', callId);
+      } catch (_) {}
       await _fail();
     }
   }
@@ -5024,6 +5082,11 @@ class CallService {
     if (!mic.isGranted) {
       throw StateError('Microphone permission is off. Allow it for Dinor in Android Settings.');
     }
+    try {
+      if (!await Permission.bluetoothConnect.isGranted) {
+        await Permission.bluetoothConnect.request();
+      }
+    } catch (_) {}
     _localStream = await navigator.mediaDevices.getUserMedia({'audio': true, 'video': false});
   }
 
@@ -5044,16 +5107,27 @@ class CallService {
       });
     };
 
-    pc.onConnectionState = (state) {
+pc.onConnectionState = (state) {
       switch (state) {
         case RTCPeerConnectionState.RTCPeerConnectionStateConnected:
           _ringTimer?.cancel();
+          _connectTimer?.cancel();
+          _connectTimer = null;
+          _onPeerReconnected();
           phase.value = CallPhase.connected;
           connectedAtMs.value ??= DateTime.now().millisecondsSinceEpoch;
           break;
+        case RTCPeerConnectionState.RTCPeerConnectionStateDisconnected:
+          // Temporary blip: give the network a grace window to recover.
+          _onPeerDisconnected();
+          break;
         case RTCPeerConnectionState.RTCPeerConnectionStateFailed:
+          _connectTimer?.cancel();
           lastErrorMessage = 'Could not connect to the other phone. Your network may block direct calls.';
           _fail();
+          break;
+        case RTCPeerConnectionState.RTCPeerConnectionStateClosed:
+          if (phase.value != CallPhase.idle) endCall(reason: 'ended');
           break;
         default:
           break;
@@ -5076,6 +5150,22 @@ class CallService {
         debugPrint('ICE write failed: $e');
       }
     });
+  }
+
+/// Tracks disconnection grace. Called from onConnectionState.
+  static void _onPeerDisconnected() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(_reconnectGrace, () {
+      if (phase.value != CallPhase.idle) {
+        lastErrorMessage = 'Connection lost.';
+        endCall(reason: 'failed');
+      }
+    });
+  }
+
+  static void _onPeerReconnected() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
   }
 
   static void _subscribe() {
@@ -5109,18 +5199,20 @@ class CallService {
       return;
     }
 
-    // Caller: apply the answer once.
     if (_isCaller && !_answerApplied && row['answer'] != null) {
       final answer = row['answer'] as Map;
-      _answerApplied = true;
-      await pc.setRemoteDescription(
-        RTCSessionDescription(answer['sdp'] as String, answer['type'] as String),
-      );
-      _remoteDescSet = true;
-      await _flushPendingIce();
+      try {
+        await pc.setRemoteDescription(
+          RTCSessionDescription(answer['sdp'] as String, answer['type'] as String),
+        );
+        _answerApplied = true;
+        _remoteDescSet = true;
+        await _flushPendingIce();
+      } catch (e) {
+        debugPrint('setRemoteDescription(answer) failed: $e');
+      }
     }
 
-    // Remote ICE: only process entries we have not applied yet.
     final remoteColumn = _isCaller ? 'receiver_ice' : 'caller_ice';
     final remote = row[remoteColumn];
     if (remote is List && remote.length > _remoteIceApplied) {
@@ -5132,7 +5224,11 @@ class CallService {
           ice['sdpMLineIndex'] as int?,
         );
         if (_remoteDescSet) {
-          await pc.addCandidate(candidate);
+          try {
+            await pc.addCandidate(candidate);
+          } catch (e) {
+            debugPrint('addCandidate failed: $e');
+          }
         } else {
           _pendingRemoteIce.add(candidate);
         }
@@ -5159,14 +5255,20 @@ class CallService {
 
   /// Ends the call. The UI returns to idle at once; media and network cleanup follow.
   static Future<void> endCall({String reason = 'ended', bool notifyRemote = true}) async {
-    if (phase.value == CallPhase.idle && _callId == null && _pc == null && _localStream == null) return;
+    final hasResources = _pc != null || _localStream != null || _callId != null;
+    if (phase.value == CallPhase.idle && !hasResources) return;
     lastEndReason = reason;
     _ringTimer?.cancel();
     _ringTimer = null;
     _callPoll?.cancel();
     _callPoll = null;
+    _connectTimer?.cancel();
+    _connectTimer = null;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _incomingExpiryTimer?.cancel();
+    _incomingExpiryTimer = null;
 
-    // Take ownership of everything first, so a second call cannot touch it.
     final id = _callId;
     final wasActive = phase.value != CallPhase.idle;
     final pc = _pc;
@@ -5184,10 +5286,9 @@ class CallService {
     _iceWriteChain = Future.value();
     connectedAtMs.value = null;
 
-    // Back to idle now, so the screen closes without waiting on the network.
-    phase.value = CallPhase.idle;
-
     await _releaseMedia(pc, stream, channel);
+
+    phase.value = CallPhase.idle;
 
     if (notifyRemote && id != null && wasActive) {
       unawaited(_db
@@ -5205,20 +5306,28 @@ class CallService {
     MediaStream? stream,
     RealtimeChannel? channel,
   ) async {
-    try {
-      await channel?.unsubscribe();
-    } catch (_) {}
-    try {
-      await pc?.close();
-    } catch (_) {}
     for (final track in stream?.getAudioTracks() ?? const <MediaStreamTrack>[]) {
       try {
-        await track.stop();
-      } catch (_) {}
+        await track.stop().timeout(const Duration(seconds: 2));
+      } catch (e) {
+        debugPrint('track.stop: $e');
+      }
     }
     try {
-      await stream?.dispose();
-    } catch (_) {}
+      await stream?.dispose().timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('stream.dispose: $e');
+    }
+    try {
+      await pc?.close().timeout(const Duration(seconds: 3));
+    } catch (e) {
+      debugPrint('pc.close: $e');
+    }
+    try {
+      await channel?.unsubscribe().timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('unsubscribe: $e');
+    }
   }
 }
 

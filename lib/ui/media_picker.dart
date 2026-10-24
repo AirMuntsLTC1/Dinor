@@ -38,12 +38,12 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
     final PermissionStatus status = await Permission.photos.request();
     final PermissionStatus videoStatus = await Permission.videos.request();
 
-    if (status.isGranted || videoStatus.isGranted) {
+    if (status.isGranted || videoStatus.isGranted || await Permission.storage.isGranted) {
       setState(() => _hasPermission = true);
       
       // Load directly (Isolate doesn't support photo_manager natively)
       final paths = await PhotoManager.getAssetPathList(
-        type: RequestType.common,
+        type: RequestType.all,
         onlyAll: true,
       );
       

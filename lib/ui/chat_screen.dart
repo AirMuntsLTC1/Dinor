@@ -10,14 +10,12 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../ffi/dinor_bindings.dart';
 import '../chat/ai_service.dart';
 import '../chat/message_cache.dart';
-import '../chat/call_service.dart';
 import '../chat/chat_service.dart';
 import 'ai_avatar.dart';
 import 'media_picker.dart';
 import 'emoji_picker.dart';
 import 'media_viewer.dart';
 import 'dinor_theme.dart';
-import 'call_screen.dart';
 import 'skeleton_loader.dart';
 
 enum MessageStatus { sending, sent, failed }
@@ -126,7 +124,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _subscribeRealtime(convId);
     // Fallback: check for new messages every few seconds, in case Realtime lags.
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _pollNewMessages());
+    _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _pollNewMessages());
     await _fetchMessages();
     ChatService.markAsRead(convId);
   }
@@ -135,7 +133,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void _subscribeRealtime(String convId) {
     _chatChannel?.unsubscribe();
     _chatChannel = supabase.channel('chat:$convId').onPostgresChanges(
-      event: PostgresChangeEvent.insert,
+      event: PostgresChangeEvent.all,
       schema: 'public',
       table: 'messages',
       filter: PostgresChangeFilter(
@@ -144,7 +142,19 @@ class _ChatScreenState extends State<ChatScreen> {
         value: convId,
       ),
       callback: (payload) {
-        if (mounted) _ingest(payload.newRecord);
+        if (payload.eventType == PostgresChangeEvent.insert) {
+          if (mounted) _ingest(payload.newRecord);
+        } else if (payload.eventType == PostgresChangeEvent.update) {
+          if (mounted) {
+            final updated = payload.newRecord;
+            final idx = _messages.indexWhere((m) => m.id == updated['id'].toString());
+            if (idx != -1) {
+              setState(() {
+                _messages[idx] = _rowToMessage(updated);
+              });
+            }
+          }
+        }
       },
     ).subscribe();
   }
@@ -436,14 +446,17 @@ class _ChatScreenState extends State<ChatScreen> {
                     maxScale: 4.0,
                     child: Center(
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(24), // Smooth iOS rounded corners
-                        child: CachedNetworkImage(
-                          imageUrl: img.text,
-                          width: double.infinity,
-                          fit: BoxFit.contain,
-                          memCacheWidth: 1000, 
-                          placeholder: (c, u) => const Center(child: CircularProgressIndicator(color: Colors.white)),
-                          errorWidget: (c, u, e) => const Icon(Icons.broken_image, color: Colors.white),
+                        borderRadius: BorderRadius.circular(24),
+                        child: Container(
+                          color: Colors.black26,
+                          child: CachedNetworkImage(
+                            imageUrl: img.text,
+                            width: double.infinity,
+                            fit: BoxFit.contain,
+                            memCacheWidth: 1000, 
+                            placeholder: (c, u) => const Center(child: CircularProgressIndicator(color: Colors.white)),
+                            errorWidget: (c, u, e) => const Icon(Icons.broken_image, color: Colors.white),
+                          ),
                         ),
                       ),
                     ),
@@ -876,40 +889,6 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
                     ),
                     
-                    // Call Icon
-                    if (!widget.isAi && widget.otherUserId != null && _selectedMessage == null)
-                      IconButton(
-                        icon: const Icon(Icons.call, color: Colors.white, size: 22),
-                        onPressed: () {
-                          if (_resolvedConversationId != null && widget.otherUserId != null) {
-                            if (CallService.phase.value != CallPhase.idle) return;
-                            Navigator.push(
-                              context,
-                              PageRouteBuilder(
-                                pageBuilder: (context, animation, secondaryAnimation) => CallScreen(
-                                  receiverName: widget.title,
-                                  receiverId: widget.otherUserId,
-                                  conversationId: _resolvedConversationId!,
-                                ),
-                                transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                                  return FadeTransition(
-                                    opacity: animation,
-                                    child: ScaleTransition(
-                                      scale: Tween<double>(begin: 0.9, end: 1.0).animate(
-                                        CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-                                      ),
-                                      child: child,
-                                    ),
-                                  );
-                                },
-                                transitionDuration: const Duration(milliseconds: 400),
-                              ),
-                            );
-                          }
-                        },
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                      ),
                   ],
                 ),
               ),
@@ -1071,9 +1050,13 @@ class _ChatScreenState extends State<ChatScreen> {
                                 if (selectedAssets.isEmpty) return;
 
                                 List<File> cachedFiles = [];
+                                List<bool> isVideoList = [];
                                 for (var asset in selectedAssets) {
                                   final file = await asset.file;
-                                  if (file != null) cachedFiles.add(file);
+                                  if (file != null) {
+                                    cachedFiles.add(file);
+                                    isVideoList.add(asset.type == AssetType.video);
+                                  }
                                 }
 
                                 if (cachedFiles.isEmpty) return;
@@ -1113,9 +1096,11 @@ class _ChatScreenState extends State<ChatScreen> {
                                   for (int i = 0; i < cachedFiles.length; i++) {
                                     final file = cachedFiles[i];
                                     final tempId = tempMessages[i].id;
+                                    final isVideo = isVideoList[i];
 
                                     try {
-                                      final fileName = '${DateTime.now().millisecondsSinceEpoch}_${i}_$_currentUserId.jpg';
+                                      final ext = isVideo ? 'mp4' : 'jpg';
+                                      final fileName = '${DateTime.now().millisecondsSinceEpoch}_${i}_$_currentUserId.$ext';
                                       await supabase.storage.from('chat_media').upload(fileName, file);
                                       final publicUrl = supabase.storage.from('chat_media').getPublicUrl(fileName);
 
@@ -1162,7 +1147,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                   }
 
                                   await supabase.from('conversations').update({
-                                    'last_message': '📷 ${cachedFiles.length} Photos',
+                                    'last_message': '📷 ${cachedFiles.length} Media',
                                     'last_message_time': DateTime.now().toUtc().toIso8601String(),
                                   }).eq('id', _resolvedConversationId!);
                                 }
