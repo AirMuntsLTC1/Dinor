@@ -59,6 +59,7 @@ class _ChatScreenState extends State<ChatScreen> {
   // Long press state
   Message? _selectedMessage;
   int? _selectedMessageIndex;
+  List<Message> _selectedAlbumImages = [];
   OverlayEntry? _menuOverlay;
 
   final supabase = Supabase.instance.client;
@@ -277,9 +278,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 clipBehavior: Clip.hardEdge,
                 child: PageView.builder(
-                  itemCount: albumImages.length,
+                  itemCount: _selectedAlbumImages.length,
                   itemBuilder: (context, i) {
-                    final img = albumImages[i];
+                    final img = _selectedAlbumImages[i];
                     return Container(
                       color: Colors.black,
                       child: CachedNetworkImage(
