@@ -234,46 +234,73 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _showMessageMenu(BuildContext context, int index, Message msg) {
     _closeMessageMenu();
+    
+    List<Message> albumImages = [];
+    if (msg.albumId != null) {
+      albumImages = _messages.where((m) => m.albumId == msg.albumId).toList();
+    } else {
+      albumImages = [msg];
+    }
+
     setState(() {
       _selectedMessage = msg;
       _selectedMessageIndex = index;
+      _selectedAlbumImages = albumImages;
     });
 
     _menuOverlay = OverlayEntry(
       builder: (context) {
         return Stack(
           children: [
-            // 1. Blurred Background (Covers whole screen)
+            // 1. Blurred Background
             Positioned.fill(
               child: GestureDetector(
                 onTap: _closeMessageMenu,
                 child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+                  filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
                   child: Container(
-                    color: Colors.black.withValues(alpha: 0.4),
+                    color: Colors.black.withValues(alpha: 0.5),
                   ),
                 ),
               ),
             ),
-            // 2. The Selected Message (Un-blurred, shrunk, centered)
+            
+            // 2. Selected Media Carousel
             Positioned(
-              top: MediaQuery.of(context).size.height * 0.3,
-              left: MediaQuery.of(context).size.width / 2 - 130, // Assuming max width 260
-              child: Material(
-                color: Colors.transparent,
-                child: Transform.scale(
-                  scale: 0.95, // Shrinks slightly
-                  child: Opacity(
-                    opacity: 1.0,
-                    child: _buildMessageBubble(msg, index, isOverlay: true),
-                  ),
+              top: MediaQuery.of(context).size.height * 0.25,
+              left: 20,
+              right: 20,
+              child: Container(
+                height: MediaQuery.of(context).size.height * 0.45,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                clipBehavior: Clip.hardEdge,
+                child: PageView.builder(
+                  itemCount: albumImages.length,
+                  itemBuilder: (context, i) {
+                    final img = albumImages[i];
+                    return Container(
+                      color: Colors.black,
+                      child: CachedNetworkImage(
+                        imageUrl: img.text,
+                        fit: BoxFit.contain,
+                        // Use memCacheWidth to ensure it loads instantly from RAM
+                        memCacheWidth: 1000, 
+                        // Show the exact same image from RAM, no spinner
+                        placeholder: (c, u) => const Center(child: CircularProgressIndicator(color: Colors.white)),
+                        errorWidget: (c, u, e) => const Icon(Icons.broken_image, color: Colors.white),
+                      ),
+                    );
+                  },
                 ),
               ),
             ),
-            // 3. The Action Menu (Forward, Copy, Delete)
+
+            // 3. The Action Menu
             Positioned(
-              top: MediaQuery.of(context).size.height * 0.5,
-              left: MediaQuery.of(context).size.width / 2 - 100, // Center horizontally
+              top: MediaQuery.of(context).size.height * 0.75,
+              left: MediaQuery.of(context).size.width / 2 - 100,
               child: TweenAnimationBuilder<double>(
                 tween: Tween(begin: 0.0, end: 1.0),
                 duration: const Duration(milliseconds: 200),
@@ -704,6 +731,7 @@ class _ChatScreenState extends State<ChatScreen> {
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
+              physics: _selectedMessage != null ? const NeverScrollableScrollPhysics() : const AlwaysScrollableScrollPhysics(), // Freeze background
               padding: const EdgeInsets.all(16),
               // ignore: deprecated_member_use
               cacheExtent: 1500.0,
@@ -812,7 +840,9 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           
           // Chat Composer
-          Container(
+          IgnorePointer(
+            ignoring: _selectedMessage != null, // Freeze composer
+            child: Container(
             padding: const EdgeInsets.only(left: 12, right: 12, bottom: 12, top: 4),
             decoration: const BoxDecoration(color: Colors.transparent),
             child: SafeArea(
@@ -1042,6 +1072,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ],
               ),
             ),
+          ),
           ),
         ],
       ),
