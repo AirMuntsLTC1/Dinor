@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Lifecycle of the one active call on this device.
@@ -64,6 +65,9 @@ class CallService {
   static Timer? _ringTimer;
 
   static String? get currentCallId => _callId;
+
+  /// Human-readable reason for the last failure (shown on the call screen).
+  static String? lastErrorMessage;
 
   /// Why the last call ended: 'ended', 'missed', 'declined', 'failed', or null.
   static String? lastEndReason;
@@ -138,6 +142,7 @@ class CallService {
     if (phase.value != CallPhase.idle) return;
     final me = _db.auth.currentUser!.id;
     _isCaller = true;
+    lastErrorMessage = null;
     phase.value = CallPhase.calling;
 
     try {
@@ -169,6 +174,7 @@ class CallService {
       });
     } catch (e) {
       debugPrint('startCall failed: $e');
+      lastErrorMessage = _friendly(e);
       await _fail();
     }
   }
@@ -210,6 +216,7 @@ class CallService {
       await _applyRow(row);
     } catch (e) {
       debugPrint('acceptCall failed: $e');
+      lastErrorMessage = _friendly(e);
       await _fail();
     }
   }
@@ -219,6 +226,10 @@ class CallService {
   // ---------------------------------------------------------------------------
 
   static Future<void> _openMedia() async {
+    final mic = await Permission.microphone.request();
+    if (!mic.isGranted) {
+      throw StateError('Microphone permission is off. Allow it for Dinor in Android Settings.');
+    }
     _localStream = await navigator.mediaDevices.getUserMedia({'audio': true, 'video': false});
   }
 
@@ -247,6 +258,7 @@ class CallService {
           connectedAtMs.value ??= DateTime.now().millisecondsSinceEpoch;
           break;
         case RTCPeerConnectionState.RTCPeerConnectionStateFailed:
+          lastErrorMessage = 'Could not connect to the other phone. Your network may block direct calls.';
           _fail();
           break;
         default:
@@ -345,6 +357,11 @@ class CallService {
   }
 
   static Future<void> _fail() => endCall(reason: 'failed');
+
+  static String _friendly(Object e) {
+    final text = e.toString().replaceFirst(RegExp(r'^[A-Za-z]*(Error|Exception): '), '');
+    return text.length > 160 ? '${text.substring(0, 160)}…' : text;
+  }
 
   /// Ends the call locally and tells the other side. Safe to call more than once.
   static Future<void> endCall({String reason = 'ended', bool notifyRemote = true}) async {

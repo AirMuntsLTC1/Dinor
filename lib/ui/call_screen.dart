@@ -87,7 +87,9 @@ class _CallScreenState extends State<CallScreen> {
 
     if (mounted) {
       // Brief pause so the user sees "Call ended" / "No answer".
-      await Future.delayed(const Duration(milliseconds: 700));
+      // Failures stay on screen long enough to read the reason.
+      final failed = CallService.lastEndReason == 'failed';
+      await Future.delayed(Duration(milliseconds: failed ? 6000 : 700));
       if (mounted) Navigator.of(context).pop();
     }
   }
@@ -204,6 +206,15 @@ class _CallScreenState extends State<CallScreen> {
               ),
               const SizedBox(height: 40),
               Text(name, style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+              if (_closing && CallService.lastErrorMessage != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  child: Text(
+                    CallService.lastErrorMessage!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                  ),
+                ),
               const Spacer(),
               if (!connected && !_closing) const AnimatedCallingDots(),
               const Spacer(),
