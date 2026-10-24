@@ -283,12 +283,15 @@ class _ChatScreenState extends State<ChatScreen> {
                       minScale: 0.5,
                       maxScale: 4.0,
                       child: Center(
-                        child: CachedNetworkImage(
-                          imageUrl: img.text,
-                          fit: BoxFit.contain,
-                          memCacheWidth: 1000, 
-                          placeholder: (c, u) => const Center(child: CircularProgressIndicator(color: Colors.white)),
-                          errorWidget: (c, u, e) => const Icon(Icons.broken_image, color: Colors.white),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: CachedNetworkImage(
+                            imageUrl: img.text,
+                            fit: BoxFit.contain,
+                            memCacheWidth: 1000, 
+                            placeholder: (c, u) => const Center(child: CircularProgressIndicator(color: Colors.white)),
+                            errorWidget: (c, u, e) => const Icon(Icons.broken_image, color: Colors.white),
+                          ),
                         ),
                       ),
                     );
@@ -299,7 +302,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
             // 3. The Action Menu
             Positioned(
-              top: MediaQuery.of(context).size.height * 0.15, // Moved to top center
+              top: MediaQuery.of(context).size.height * 0.15, // Top center
               left: MediaQuery.of(context).size.width / 2 - 100,
               child: TweenAnimationBuilder<double>(
                 tween: Tween(begin: 0.0, end: 1.0),
