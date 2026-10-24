@@ -272,7 +272,6 @@ class _ChatScreenState extends State<ChatScreen> {
               left: 20,
               right: 20,
               child: Container(
-                height: MediaQuery.of(context).size.height * 0.55,
                 decoration: const BoxDecoration(
                   color: Colors.transparent,
                 ),
@@ -284,15 +283,12 @@ class _ChatScreenState extends State<ChatScreen> {
                       minScale: 0.5,
                       maxScale: 4.0,
                       child: Center(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(16), // Rounded corners for the image
-                          child: CachedNetworkImage(
-                            imageUrl: img.text,
-                            fit: BoxFit.contain,
-                            memCacheWidth: 1000, 
-                            placeholder: (c, u) => const Center(child: CircularProgressIndicator(color: Colors.white)),
-                            errorWidget: (c, u, e) => const Icon(Icons.broken_image, color: Colors.white),
-                          ),
+                        child: CachedNetworkImage(
+                          imageUrl: img.text,
+                          fit: BoxFit.contain,
+                          memCacheWidth: 1000, 
+                          placeholder: (c, u) => const Center(child: CircularProgressIndicator(color: Colors.white)),
+                          errorWidget: (c, u, e) => const Icon(Icons.broken_image, color: Colors.white),
                         ),
                       ),
                     );
@@ -303,7 +299,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
             // 3. The Action Menu
             Positioned(
-              top: MediaQuery.of(context).size.height * 0.75,
+              top: MediaQuery.of(context).size.height * 0.15, // Moved to top center
               left: MediaQuery.of(context).size.width / 2 - 100,
               child: TweenAnimationBuilder<double>(
                 tween: Tween(begin: 0.0, end: 1.0),
