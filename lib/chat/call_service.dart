@@ -33,7 +33,24 @@ class CallService {
 
   static SupabaseClient get _db => Supabase.instance.client;
 
+/// How long to ring before giving up (caller side, callee never answered).
   static const Duration _ringTimeout = Duration(seconds: 45);
+
+  /// After the callee answers, how long to wait for WebRTC to reach 'connected'
+  /// before declaring failure. Covers "answered but network broken".
+  static const Duration _connectTimeout = Duration(seconds: 15);
+
+  /// If the peer disconnects mid-call (network blip), how long to hold on
+  /// before ending. Messenger/WhatsApp give ~8s of grace.
+  static const Duration _reconnectGrace = Duration(seconds: 8);
+
+  /// Hard safety cap: stop the ringtone if 'stop' was never called
+  /// (app crash, process kill, exception in the stop path).
+  static const Duration _ringSafetyTimeout = Duration(seconds: 60);
+
+  /// Incoming ring expires after this even if the Realtime 'ended' update
+  /// never arrives (network glitch on the DB update).
+  static const Duration _incomingExpiry = Duration(seconds: 30);
   static const MethodChannel _ringChannel = MethodChannel('dinor/ring');
   static const Map<String, dynamic> _rtcConfig = {
     'iceServers': [
@@ -66,6 +83,10 @@ class CallService {
 
   static Future<void> _iceWriteChain = Future.value();
   static Timer? _ringTimer;
+static Timer? _connectTimer;
+  static Timer? _reconnectTimer;
+  static Timer? _ringSafetyTimer;
+  static Timer? _incomingExpiryTimer;
   static Timer? _callPoll;
   static Timer? _incomingPoll;
   static final Set<String> _seenCallIds = {};
@@ -76,11 +97,21 @@ class CallService {
   // Ringing (native ringtone + vibration; silently skipped where unavailable)
   // ---------------------------------------------------------------------------
 
-  static Future<void> _ring(bool on) async {
+static Future<void> _ring(bool on) async {
     try {
       await _ringChannel.invokeMethod(on ? 'start' : 'stop');
     } catch (_) {
       // Not available on this platform: the on-screen prompt still shows.
+    }
+    // Safety: if 'stop' never arrives (crash, exception), force-stop.
+    if (on) {
+      _ringSafetyTimer?.cancel();
+      _ringSafetyTimer = Timer(_ringSafetyTimeout, () {
+        try { _ringChannel.invokeMethod('stop'); } catch (_) {}
+      });
+    } else {
+      _ringSafetyTimer?.cancel();
+      _ringSafetyTimer = null;
     }
   }
 
@@ -180,6 +211,17 @@ class CallService {
     _ring(false);
   }
 
+static void _armIncomingExpiry(String callId) {
+    _incomingExpiryTimer?.cancel();
+    _incomingExpiryTimer = Timer(_incomingExpiry, () {
+      final current = incoming.value;
+      if (current != null && current.callId == callId) {
+        _clearIncoming();
+        _declineRow(callId);
+      }
+    });
+  }
+
   static Future<void> _onIncomingRow(Map<String, dynamic> row) async {
     if (row['status'] != 'ringing') return;
     // Realtime and polling can both report the same call: handle it once.
@@ -209,6 +251,7 @@ class CallService {
       conversationId: row['conversation_id'].toString(),
       callerName: name,
     );
+    _armIncomingExpiry(row['id'].toString());
   }
 
   /// Closes the prompt when the caller cancels or the call is answered elsewhere.
@@ -259,6 +302,17 @@ class CallService {
         'offer': {'sdp': offer.sdp, 'type': offer.type},
       }).eq('id', _callId!);
 
+// If the callee answers but WebRTC never connects (NAT/firewall),
+      // fail fast instead of leaving the user staring at "Connecting...".
+      _connectTimer?.cancel();
+      _connectTimer = Timer(_connectTimeout, () {
+        if (phase.value == CallPhase.calling || phase.value == CallPhase.connecting) {
+          lastErrorMessage = 'Could not connect. Your network may block direct calls.';
+          endCall(reason: 'failed');
+        }
+      });
+
+      // Total ring cap: if the callee never answers, end it.
       _subscribe();
       _startCallPoll();
       final current = await _db.from('calls').select().eq('id', _callId!).single();
@@ -369,21 +423,32 @@ class CallService {
       });
     };
 
-    pc.onConnectionState = (state) {
+pc.onConnectionState = (state) {
       switch (state) {
         case RTCPeerConnectionState.RTCPeerConnectionStateConnected:
           _ringTimer?.cancel();
+          _connectTimer?.cancel();
+          _connectTimer = null;
+          _onPeerReconnected();
           phase.value = CallPhase.connected;
           connectedAtMs.value ??= DateTime.now().millisecondsSinceEpoch;
           break;
+        case RTCPeerConnectionState.RTCPeerConnectionStateDisconnected:
+          // Temporary blip: give the network a grace window to recover.
+          _onPeerDisconnected();
+          break;
         case RTCPeerConnectionState.RTCPeerConnectionStateFailed:
+          _connectTimer?.cancel();
           lastErrorMessage = 'Could not connect to the other phone. Your network may block direct calls.';
           _fail();
+          break;
+        case RTCPeerConnectionState.RTCPeerConnectionStateClosed:
+          if (phase.value != CallPhase.idle) endCall(reason: 'ended');
           break;
         default:
           break;
       }
-    };
+    };;
   }
 
   /// Serializes ICE writes so concurrent candidates are never lost.
@@ -401,6 +466,22 @@ class CallService {
         debugPrint('ICE write failed: $e');
       }
     });
+  }
+
+/// Tracks disconnection grace. Called from onConnectionState.
+  static void _onPeerDisconnected() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(_reconnectGrace, () {
+      if (phase.value != CallPhase.idle) {
+        lastErrorMessage = 'Connection lost.';
+        endCall(reason: 'failed');
+      }
+    });
+  }
+
+  static void _onPeerReconnected() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
   }
 
   static void _subscribe() {
