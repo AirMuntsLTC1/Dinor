@@ -272,25 +272,28 @@ class _ChatScreenState extends State<ChatScreen> {
               left: 20,
               right: 20,
               child: Container(
-                height: MediaQuery.of(context).size.height * 0.45,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
+                height: MediaQuery.of(context).size.height * 0.55,
+                decoration: const BoxDecoration(
+                  color: Colors.transparent,
                 ),
-                clipBehavior: Clip.hardEdge,
                 child: PageView.builder(
                   itemCount: _selectedAlbumImages.length,
                   itemBuilder: (context, i) {
                     final img = _selectedAlbumImages[i];
-                    return Container(
-                      color: Colors.black,
-                      child: CachedNetworkImage(
-                        imageUrl: img.text,
-                        fit: BoxFit.contain,
-                        // Use memCacheWidth to ensure it loads instantly from RAM
-                        memCacheWidth: 1000, 
-                        // Show the exact same image from RAM, no spinner
-                        placeholder: (c, u) => const Center(child: CircularProgressIndicator(color: Colors.white)),
-                        errorWidget: (c, u, e) => const Icon(Icons.broken_image, color: Colors.white),
+                    return InteractiveViewer(
+                      minScale: 0.5,
+                      maxScale: 4.0,
+                      child: Center(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16), // Rounded corners for the image
+                          child: CachedNetworkImage(
+                            imageUrl: img.text,
+                            fit: BoxFit.contain,
+                            memCacheWidth: 1000, 
+                            placeholder: (c, u) => const Center(child: CircularProgressIndicator(color: Colors.white)),
+                            errorWidget: (c, u, e) => const Icon(Icons.broken_image, color: Colors.white),
+                          ),
+                        ),
                       ),
                     );
                   },
