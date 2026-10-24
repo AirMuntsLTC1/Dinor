@@ -15,6 +15,7 @@ import 'media_picker.dart';
 import 'emoji_picker.dart';
 import 'media_viewer.dart';
 import 'dinor_theme.dart';
+import 'skeleton_loader.dart';
 
 enum MessageStatus { sending, sent, failed }
 
@@ -55,6 +56,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final List<Message> _messages = [];
   final GlobalKey _inputKey = GlobalKey();
   bool _isAiTyping = false;
+  bool _isLoadingMessages = true;
   
   // Long press state
   Message? _selectedMessage;
@@ -65,6 +67,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final supabase = Supabase.instance.client;
   RealtimeChannel? _chatChannel;
   String? _currentUserId;
+  String? _resolvedConversationId;
 
   @override
   void initState() {
@@ -78,7 +81,20 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _initSupabaseChat() async {
     _currentUserId = supabase.auth.currentUser?.id;
-    if (widget.conversationId != null) ChatService.markAsRead(widget.conversationId!);
+    
+    // If we don't have a conversation ID yet (new chat), create it
+    if (_resolvedConversationId == null && widget.otherUserId != null) {
+      final newId = await ChatService.getOrCreateConversation(widget.otherUserId!);
+      // We can't update the widget's final field, so we'll use a local state variable
+      _resolvedConversationId = newId;
+    } else {
+      _resolvedConversationId = _resolvedConversationId;
+    }
+
+    if (_resolvedConversationId != null) {
+      ChatService.markAsRead(_resolvedConversationId!);
+    }
+    
     _fetchMessages();
 
     _chatChannel = supabase.channel('public:messages')
@@ -88,7 +104,7 @@ class _ChatScreenState extends State<ChatScreen> {
         table: 'messages',
         callback: (payload) {
           final newMsg = payload.newRecord;
-          if (mounted && newMsg['conversation_id'] == widget.conversationId) {
+          if (mounted && newMsg['conversation_id'] == _resolvedConversationId) {
             final exists = _messages.any((m) => m.id == newMsg['id'].toString());
             if (!exists) {
               setState(() {
@@ -110,8 +126,12 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _fetchMessages() async {
+    if (_resolvedConversationId == null) {
+       setState(() => _isLoadingMessages = false);
+       return;
+    }
     try {
-      final data = await supabase.from('messages').select().eq('conversation_id', widget.conversationId ?? '').order('created_at', ascending: true);
+      final data = await supabase.from('messages').select().eq('conversation_id', _resolvedConversationId ?? '').order('created_at', ascending: true);
       setState(() {
         _messages.clear();
         for (var row in data) {
@@ -129,6 +149,8 @@ class _ChatScreenState extends State<ChatScreen> {
       _scrollToBottom();
     } catch (e) {
       debugPrint("Error fetching messages: $e");
+    } finally {
+      if (mounted) setState(() => _isLoadingMessages = false);
     }
   }
 
@@ -177,7 +199,7 @@ class _ChatScreenState extends State<ChatScreen> {
         'sender_id': _currentUserId,
         'content': text,
         'is_image': false,
-        'conversation_id': widget.conversationId,
+        'conversation_id': _resolvedConversationId,
         'is_read': false,
       }).select('id').single();
 
@@ -191,7 +213,7 @@ class _ChatScreenState extends State<ChatScreen> {
       await supabase.from('conversations').update({
         'last_message': text,
         'last_message_time': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', widget.conversationId!);
+      }).eq('id', _resolvedConversationId!);
 
     } catch (e) {
       debugPrint("Failed to send: $e");
@@ -732,114 +754,116 @@ class _ChatScreenState extends State<ChatScreen> {
           
           // Chat Messages
           Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              physics: _selectedMessage != null ? const NeverScrollableScrollPhysics() : const AlwaysScrollableScrollPhysics(), // Freeze background
-              padding: const EdgeInsets.all(16),
-              // ignore: deprecated_member_use
-              cacheExtent: 1500.0,
-              itemCount: _messages.length + (_isAiTyping ? 1 : 0),
-              itemBuilder: (context, index) {
-                if (index == _messages.length && _isAiTyping) {
-                  return const Align(
-                    alignment: Alignment.centerLeft,
-                    child: Padding(
-                      padding: EdgeInsets.all(8.0),
-                      child: Text("Dinor AI is searching...", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
-                    ),
-                  );
-                }
-
-                final msg = _messages[index];
-
-                // --- ALBUM GRID LOGIC ---
-                if (msg.isImage && msg.albumId != null) {
-                  final albumImages = _messages.where((m) => m.albumId == msg.albumId).toList();
-                  if (albumImages.isNotEmpty && albumImages.first.id == msg.id) {
-                    String? albumCaption;
-                    for (var i in albumImages) {
-                      if (i.caption != null && i.caption!.isNotEmpty) {
-                        albumCaption = i.caption;
-                        break;
-                      }
-                    }
-
-                    return Align(
-                      alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
-                      child: GestureDetector(
-                        onTap: () {
-                          final urls = albumImages.map((m) => m.text).toList();
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => MediaViewer(
-                                mediaUrls: urls,
-                                initialIndex: 0,
-                                senderName: msg.isMe ? "You" : widget.title,
-                                senderAvatar: "",
-                                caption: albumCaption,
-                                timestamp: DateTime.now(),
-                              ),
-                            ),
-                          );
-                        },
-                        onLongPress: () => _showMessageMenu(context, index, msg),
-                        child: AnimatedScale(
-                          scale: _selectedMessageIndex == index ? 0.95 : 1.0, // Shrink effect
-                          duration: const Duration(milliseconds: 200),
-                          curve: Curves.easeOutBack,
-                          child: Column(
-                            crossAxisAlignment: msg.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                            children: [
-                              Container(
-                                margin: const EdgeInsets.only(bottom: 4),
-                                width: 260,
-                                clipBehavior: Clip.hardEdge,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: _buildAlbumGrid(albumImages, msg.isMe),
-                              ),
-                              if (albumCaption != null && albumCaption.isNotEmpty)
-                                Container(
-                                  margin: const EdgeInsets.only(bottom: 8),
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    gradient: msg.isMe ? DinorTheme.primaryGradient : null,
-                                    color: msg.isMe ? null : DinorTheme.surfaceDark,
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                  child: Text(albumCaption, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  } else {
-                    return const SizedBox.shrink();
-                  }
-                }
-                // --- END ALBUM LOGIC ---
-
-                return Align(
-                  alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Builder(
-                    builder: (bubbleContext) {
-                      return GestureDetector(
-                        onLongPress: () => _showMessageMenu(bubbleContext, index, msg),
-                        child: AnimatedScale(
-                          scale: _selectedMessageIndex == index ? 0.95 : 1.0, // Shrink effect
-                          duration: const Duration(milliseconds: 200),
-                          curve: Curves.easeOutBack,
-                          child: _buildMessageBubble(msg, index),
+            child: _isLoadingMessages 
+              ? const MessageSkeleton() 
+              : ListView.builder(
+                  controller: _scrollController,
+                  physics: _selectedMessage != null ? const NeverScrollableScrollPhysics() : const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  // ignore: deprecated_member_use
+                  cacheExtent: 1500.0,
+                  itemCount: _messages.length + (_isAiTyping ? 1 : 0),
+                  itemBuilder: (context, index) {
+                    if (index == _messages.length && _isAiTyping) {
+                      return const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Padding(
+                          padding: EdgeInsets.all(8.0),
+                          child: Text("Dinor AI is searching...", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
                         ),
                       );
                     }
-                  ),
-                );
-              },
-            ),
+
+                    final msg = _messages[index];
+
+                    // --- ALBUM GRID LOGIC ---
+                    if (msg.isImage && msg.albumId != null) {
+                      final albumImages = _messages.where((m) => m.albumId == msg.albumId).toList();
+                      if (albumImages.isNotEmpty && albumImages.first.id == msg.id) {
+                        String? albumCaption;
+                        for (var i in albumImages) {
+                          if (i.caption != null && i.caption!.isNotEmpty) {
+                            albumCaption = i.caption;
+                            break;
+                          }
+                        }
+
+                        return Align(
+                          alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
+                          child: GestureDetector(
+                            onTap: () {
+                              final urls = albumImages.map((m) => m.text).toList();
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => MediaViewer(
+                                    mediaUrls: urls,
+                                    initialIndex: 0,
+                                    senderName: msg.isMe ? "You" : widget.title,
+                                    senderAvatar: "",
+                                    caption: albumCaption,
+                                    timestamp: DateTime.now(),
+                                  ),
+                                ),
+                              );
+                            },
+                            onLongPress: () => _showMessageMenu(context, index, msg),
+                            child: AnimatedScale(
+                              scale: _selectedMessageIndex == index ? 0.95 : 1.0,
+                              duration: const Duration(milliseconds: 200),
+                              curve: Curves.easeOutBack,
+                              child: Column(
+                                crossAxisAlignment: msg.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    margin: const EdgeInsets.only(bottom: 4),
+                                    width: 260,
+                                    clipBehavior: Clip.hardEdge,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                    child: _buildAlbumGrid(albumImages, msg.isMe),
+                                  ),
+                                  if (albumCaption != null && albumCaption.isNotEmpty)
+                                    Container(
+                                      margin: const EdgeInsets.only(bottom: 8),
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                      decoration: BoxDecoration(
+                                        gradient: msg.isMe ? DinorTheme.primaryGradient : null,
+                                        color: msg.isMe ? null : DinorTheme.surfaceDark,
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      child: Text(albumCaption, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      } else {
+                        return const SizedBox.shrink();
+                      }
+                    }
+                    // --- END ALBUM LOGIC ---
+
+                    return Align(
+                      alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
+                      child: Builder(
+                        builder: (bubbleContext) {
+                          return GestureDetector(
+                            onLongPress: () => _showMessageMenu(bubbleContext, index, msg),
+                            child: AnimatedScale(
+                              scale: _selectedMessageIndex == index ? 0.95 : 1.0,
+                              duration: const Duration(milliseconds: 200),
+                              curve: Curves.easeOutBack,
+                              child: _buildMessageBubble(msg, index),
+                            ),
+                          );
+                        }
+                      ),
+                    );
+                  },
+                ),
           ),
           
           // Chat Composer
@@ -935,7 +959,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                         'sender_id': _currentUserId,
                                         'content': publicUrl,
                                         'is_image': true,
-                                        'conversation_id': widget.conversationId,
+                                        'conversation_id': _resolvedConversationId,
                                         'is_read': false,
                                         'album_id': albumId,
                                         'caption': (i == 0 && caption.isNotEmpty) ? caption : null,
@@ -976,7 +1000,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                   await supabase.from('conversations').update({
                                     'last_message': '📷 ${cachedFiles.length} Photos',
                                     'last_message_time': DateTime.now().toUtc().toIso8601String(),
-                                  }).eq('id', widget.conversationId!);
+                                  }).eq('id', _resolvedConversationId!);
                                 }
                               }
                             },
@@ -1018,7 +1042,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                     if (widget.isAi) {
                                       setState(() => _messages.add(Message(DateTime.now().toString(), url, true, isImage: true)));
                                       _scrollToBottom();
-                                    } else if (_currentUserId != null && widget.conversationId != null) {
+                                    } else if (_currentUserId != null && _resolvedConversationId != null) {
                                       int cppTime = 0;
                                       try { cppTime = DinorCore.load().getFastTimestamp(); } catch (_) {}
                                       final tempId = 'temp_$cppTime';
@@ -1032,7 +1056,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                           'sender_id': _currentUserId,
                                           'content': url,
                                           'is_image': true,
-                                          'conversation_id': widget.conversationId,
+                                          'conversation_id': _resolvedConversationId,
                                           'is_read': false,
                                         }).select('id').single();
 
@@ -1044,7 +1068,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                         await supabase.from('conversations').update({
                                           'last_message': '🎬 GIF',
                                           'last_message_time': DateTime.now().toUtc().toIso8601String(),
-                                        }).eq('id', widget.conversationId!);
+                                        }).eq('id', _resolvedConversationId!);
                                       } catch (e) {
                                         setState(() {
                                           final index = _messages.indexWhere((m) => m.id == tempId);
