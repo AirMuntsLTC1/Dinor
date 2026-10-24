@@ -81,6 +81,13 @@ class _ChatScreenState extends State<ChatScreen> {
     } else {
       _currentUserId = supabase.auth.currentUser?.id;
       _resolvedConversationId = widget.conversationId;
+      // Paint cached messages before the first frame: no skeleton, no flash.
+      final cached = widget.conversationId == null ? null : LocalCache.peekMessages(widget.conversationId!);
+      if (cached != null && cached.isNotEmpty) {
+        _messages.addAll(cached.map(_rowToMessage));
+        _isLoadingMessages = false;
+        _jumpToBottom();
+      }
       _loadChat();
     }
   }
@@ -97,21 +104,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// Opens the chat: paints cached messages at once, then reconciles with the server.
   Future<void> _loadChat() async {
-    // 1. Instant paint from the local cache (skeleton only when there is no history).
-    final knownId = widget.conversationId;
-    if (knownId != null) {
-      final cached = await LocalCache.loadMessages(knownId);
-      if (mounted && cached != null && cached.isNotEmpty) {
-        setState(() {
-          _messages
-            ..clear()
-            ..addAll(cached.map(_rowToMessage));
-          _isLoadingMessages = false;
-        });
-        _scrollToBottom();
-      }
-    }
-
     // 2. New chats only know the other user's id; resolve the conversation.
     if (_resolvedConversationId == null) {
       if (widget.otherUserId == null) {
@@ -192,20 +184,50 @@ class _ChatScreenState extends State<ChatScreen> {
       final server = List<Map<String, dynamic>>.from(data).map(_rowToMessage).toList();
       final serverIds = server.map((m) => m.id).toSet();
       final localPending = _messages.where((m) => m.id.startsWith('temp_') && !serverIds.contains(m.id)).toList();
+      final next = [...server, ...localPending];
 
-      setState(() {
-        _messages
-          ..clear()
-          ..addAll(server)
-          ..addAll(localPending);
-      });
-      _persist();
-      _scrollToBottom();
+      // Only rebuild when something actually changed (the common case on reopen is no change).
+      if (!_sameMessages(_messages, next)) {
+        final wasEmpty = _messages.isEmpty;
+        setState(() {
+          _messages
+            ..clear()
+            ..addAll(next);
+        });
+        _persist();
+        if (wasEmpty) {
+          _jumpToBottom();
+        } else {
+          _scrollToBottom();
+        }
+      }
     } catch (e) {
       debugPrint('Error fetching messages: $e');
     } finally {
-      if (mounted) setState(() => _isLoadingMessages = false);
+      if (mounted && _isLoadingMessages) setState(() => _isLoadingMessages = false);
     }
+  }
+
+  bool _sameMessages(List<Message> a, List<Message> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      final x = a[i];
+      final y = b[i];
+      if (x.id != y.id || x.text != y.text || x.isRead != y.isRead ||
+          x.status != y.status || x.caption != y.caption) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Scrolls to the newest message without animating (used when a chat opens).
+  void _jumpToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _scrollController.hasClients) {
+        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      }
+    });
   }
 
   /// Saves confirmed messages to the local cache (never pending or AI bubbles).

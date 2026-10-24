@@ -47,6 +47,20 @@ class LocalCache {
       final entry = _Entry.decode(raw);
       if (entry != null) _memory[_conversationsKey] = entry;
     }
+    // Load recent chats into memory now, so opening one paints on the first frame.
+    for (final id in prefs.getStringList(_indexKey) ?? const <String>[]) {
+      final rawMessages = prefs.getString(_messagesPrefix + id);
+      if (rawMessages == null) continue;
+      final entry = _Entry.decode(rawMessages);
+      if (entry != null) _memory[_messagesPrefix + id] = entry;
+    }
+  }
+
+  /// Synchronous: cached messages for a chat, or null. Call after [preload].
+  static List<Map<String, dynamic>>? peekMessages(String conversationId) {
+    final e = _memory[_messagesPrefix + conversationId];
+    if (e == null) return null;
+    return (e.data as List).map((x) => Map<String, dynamic>.from(x as Map)).toList();
   }
 
   // ---- conversations -------------------------------------------------------

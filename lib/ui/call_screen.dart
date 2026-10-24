@@ -162,6 +162,10 @@ class _CallScreenState extends State<CallScreen> {
     _ticker?.cancel();
     CallService.phase.removeListener(_onPhaseChanged);
     CallService.connectedAtMs.removeListener(_onConnectedChanged);
+    // Leaving this screen must never leave the microphone open.
+    if (CallService.phase.value != CallPhase.idle) {
+      CallService.endCall(reason: 'ended');
+    }
     super.dispose();
   }
 

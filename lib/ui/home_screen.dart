@@ -39,6 +39,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int _fetchSeq = 0;   // drops out-of-order conversation responses
   int _searchSeq = 0;  // drops out-of-order search responses
   bool _incomingDialogOpen = false;
+  BuildContext? _dialogContext;
 
   @override
   void initState() {
@@ -132,18 +133,21 @@ class _HomeScreenState extends State<HomeScreen> {
   String _initial(String? name) =>
       (name != null && name.isNotEmpty) ? name[0].toUpperCase() : '?';
 
-  Future<void> _openChat(String otherUserId, String name) async {
+  Future<void> _openChat(String otherUserId, String name, {String? knownConvId}) async {
     _searchFocus.unfocus();
 
-    String convId;
-    try {
-      convId = await ChatService.getOrCreateConversation(otherUserId);
-    } catch (e) {
-      debugPrint('Could not open chat: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Couldn't open chat. Try again.")));
+    // Existing chats already know their id: open immediately, no network wait.
+    String convId = knownConvId ?? '';
+    if (convId.isEmpty) {
+      try {
+        convId = await ChatService.getOrCreateConversation(otherUserId);
+      } catch (e) {
+        debugPrint('Could not open chat: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Couldn't open chat. Try again.")));
+        }
+        return;
       }
-      return;
     }
 
     if (!mounted) return;
@@ -167,22 +171,38 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onIncomingCall() {
     final call = CallService.incoming.value;
-    if (call == null || _incomingDialogOpen || !mounted) return;
+    if (!mounted) return;
+
+    if (call == null) {
+      // Caller hung up, or the call was answered elsewhere: close the prompt.
+      if (_incomingDialogOpen && _dialogContext != null) {
+        try {
+          Navigator.of(_dialogContext!).pop(); // null result: no decline sent
+        } catch (_) {}
+      }
+      return;
+    }
+    if (_incomingDialogOpen) return;
     _incomingDialogOpen = true;
+
     showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: DinorTheme.surfaceDark,
-        title: const Text('Incoming call', style: TextStyle(color: Colors.white)),
-        content: Text('${call.callerName} is calling you', style: const TextStyle(color: DinorTheme.textGrey)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Decline', style: TextStyle(color: Colors.redAccent))),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Answer', style: TextStyle(color: DinorTheme.brandBlue))),
-        ],
-      ),
+      builder: (ctx) {
+        _dialogContext = ctx;
+        return AlertDialog(
+          backgroundColor: DinorTheme.surfaceDark,
+          title: const Text('Incoming call', style: TextStyle(color: Colors.white)),
+          content: Text('${call.callerName} is calling you', style: const TextStyle(color: DinorTheme.textGrey)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Decline', style: TextStyle(color: Colors.redAccent))),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Answer', style: TextStyle(color: DinorTheme.brandBlue))),
+          ],
+        );
+      },
     ).then((accepted) {
       _incomingDialogOpen = false;
+      _dialogContext = null;
       if (accepted == true && mounted) {
         Navigator.push(
           context,
@@ -195,7 +215,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         );
-      } else {
+      } else if (accepted == false) {
         CallService.declineCall(call.callId);
       }
     });
@@ -349,7 +369,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                           ],
                         ),
-                        onTap: () => _openChat(otherId, otherName),
+                        onTap: () => _openChat(otherId, otherName, knownConvId: conv['id'] as String?),
                       ),
                     );
                   }

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -23,31 +24,33 @@ class IncomingCall {
 
 /// WebRTC audio calls signaled through the `calls` table.
 ///
-/// Fixes over the previous version:
-///  * ICE candidates are written through a serial queue, so concurrent
-///    candidates no longer overwrite each other in the database.
-///  * Remote candidates received before the remote description is set are
-///    buffered and applied afterwards (instead of throwing).
-///  * Signals that were written before we subscribed (e.g. the answer) are
-///    read once on subscribe, so they are never missed.
-///  * Connection state comes from WebRTC, not a fake 3-second timer.
-///  * All state is reset on teardown so the next call starts clean.
+/// * Incoming calls ring (native ringtone + vibration) and show a prompt.
+/// * The prompt closes if the caller hangs up before it is answered.
+/// * The answerer waits for the caller's offer instead of failing on a race.
+/// * Hang-up releases the microphone at once (peer closed, tracks stopped).
 class CallService {
   CallService._();
 
   static SupabaseClient get _db => Supabase.instance.client;
 
   static const Duration _ringTimeout = Duration(seconds: 45);
+  static const MethodChannel _ringChannel = MethodChannel('dinor/ring');
   static const Map<String, dynamic> _rtcConfig = {
     'iceServers': [
       {'urls': 'stun:stun.l.google.com:19302'},
     ],
   };
 
-  // Phase and metadata observed by the UI.
+  // Observed by the UI.
   static final ValueNotifier<CallPhase> phase = ValueNotifier(CallPhase.idle);
   static final ValueNotifier<int?> connectedAtMs = ValueNotifier(null);
   static final ValueNotifier<IncomingCall?> incoming = ValueNotifier(null);
+
+  /// Why the last call ended: 'ended', 'missed', 'declined', 'failed', or null.
+  static String? lastEndReason;
+
+  /// Human-readable reason for the last failure (shown on the call screen).
+  static String? lastErrorMessage;
 
   static RTCPeerConnection? _pc;
   static MediaStream? _localStream;
@@ -66,33 +69,47 @@ class CallService {
 
   static String? get currentCallId => _callId;
 
-  /// Human-readable reason for the last failure (shown on the call screen).
-  static String? lastErrorMessage;
+  // ---------------------------------------------------------------------------
+  // Ringing (native ringtone + vibration; silently skipped where unavailable)
+  // ---------------------------------------------------------------------------
 
-  /// Why the last call ended: 'ended', 'missed', 'declined', 'failed', or null.
-  static String? lastEndReason;
+  static Future<void> _ring(bool on) async {
+    try {
+      await _ringChannel.invokeMethod(on ? 'start' : 'stop');
+    } catch (_) {
+      // Not available on this platform: the on-screen prompt still shows.
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Incoming calls
   // ---------------------------------------------------------------------------
 
-  /// Listens for calls addressed to this user. Call once after login.
+  /// Listens for calls addressed to this user. Call after login.
   static void startIncomingListener() {
     final me = _db.auth.currentUser?.id;
     if (me == null) return;
     _incomingChannel?.unsubscribe();
+    final filter = PostgresChangeFilter(
+      type: PostgresChangeFilterType.eq,
+      column: 'receiver_id',
+      value: me,
+    );
     _incomingChannel = _db
         .channel('incoming_calls:$me')
         .onPostgresChanges(
           event: PostgresChangeEvent.insert,
           schema: 'public',
           table: 'calls',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'receiver_id',
-            value: me,
-          ),
+          filter: filter,
           callback: (payload) => _onIncomingRow(payload.newRecord),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'calls',
+          filter: filter,
+          callback: (payload) => _onIncomingUpdate(payload.newRecord),
         )
         .subscribe();
   }
@@ -100,16 +117,23 @@ class CallService {
   static void stopIncomingListener() {
     _incomingChannel?.unsubscribe();
     _incomingChannel = null;
+    _clearIncoming();
+  }
+
+  static void _clearIncoming() {
     incoming.value = null;
+    _ring(false);
   }
 
   static Future<void> _onIncomingRow(Map<String, dynamic> row) async {
     if (row['status'] != 'ringing') return;
     if (phase.value != CallPhase.idle) {
-      // Already on a call: auto-decline so the caller doesn't ring forever.
-      await declineCall(row['id'].toString());
+      // Already on a call: decline so the caller does not ring forever.
+      await _declineRow(row['id'].toString());
       return;
     }
+    _ring(true);
+
     String name = 'Unknown';
     try {
       final profile = await _db
@@ -119,6 +143,9 @@ class CallService {
           .maybeSingle();
       name = (profile?['username'] as String?) ?? name;
     } catch (_) {}
+
+    // The caller may have hung up while we looked up the name.
+    if (phase.value != CallPhase.idle) return;
     incoming.value = IncomingCall(
       callId: row['id'].toString(),
       callerId: row['caller_id'].toString(),
@@ -127,8 +154,19 @@ class CallService {
     );
   }
 
+  /// Closes the prompt when the caller cancels or the call is answered elsewhere.
+  static void _onIncomingUpdate(Map<String, dynamic> row) {
+    final current = incoming.value;
+    if (current == null || current.callId != row['id'].toString()) return;
+    if (row['status'] != 'ringing') _clearIncoming();
+  }
+
   static Future<void> declineCall(String callId) async {
-    incoming.value = null;
+    _clearIncoming();
+    await _declineRow(callId);
+  }
+
+  static Future<void> _declineRow(String callId) async {
     try {
       await _db.from('calls').update({'status': 'declined'}).eq('id', callId);
     } catch (_) {}
@@ -143,6 +181,7 @@ class CallService {
     final me = _db.auth.currentUser!.id;
     _isCaller = true;
     lastErrorMessage = null;
+    lastEndReason = null;
     phase.value = CallPhase.calling;
 
     try {
@@ -167,10 +206,9 @@ class CallService {
       // Catch an answer that was written before the subscription went live.
       final current = await _db.from('calls').select().eq('id', _callId!).single();
       await _applyRow(current);
+
       _ringTimer = Timer(_ringTimeout, () {
-        if (phase.value == CallPhase.calling) {
-          endCall(reason: 'missed');
-        }
+        if (phase.value == CallPhase.calling) endCall(reason: 'missed');
       });
     } catch (e) {
       debugPrint('startCall failed: $e');
@@ -185,15 +223,26 @@ class CallService {
 
   static Future<void> acceptCall(String callId) async {
     if (phase.value != CallPhase.idle) return;
+    _clearIncoming(); // stops the ringtone
     _isCaller = false;
     _callId = callId;
-    incoming.value = null;
+    lastErrorMessage = null;
+    lastEndReason = null;
     phase.value = CallPhase.connecting;
 
     try {
-      final row = await _db.from('calls').select().eq('id', callId).single();
+      var row = await _db.from('calls').select().eq('id', callId).single();
+
+      // The caller writes the offer just after creating the row, so wait briefly.
+      for (var i = 0; row['offer'] == null && i < 30; i++) {
+        if (row['status'] == 'ended' || row['status'] == 'declined') {
+          throw StateError('The caller hung up.');
+        }
+        await Future.delayed(const Duration(milliseconds: 500));
+        row = await _db.from('calls').select().eq('id', callId).single();
+      }
       final offer = row['offer'];
-      if (offer == null) throw StateError('Call has no offer yet');
+      if (offer == null) throw StateError('The call did not start. Ask them to call again.');
 
       await _openMedia();
       await _createPeer();
@@ -212,7 +261,6 @@ class CallService {
       }).eq('id', callId);
 
       _subscribe();
-      // Apply anything the caller already sent before we subscribed.
       await _applyRow(row);
     } catch (e) {
       debugPrint('acceptCall failed: $e');
@@ -363,46 +411,65 @@ class CallService {
     return text.length > 160 ? '${text.substring(0, 160)}…' : text;
   }
 
-  /// Ends the call locally and tells the other side. Safe to call more than once.
+  /// Ends the call. The UI returns to idle at once; media and network cleanup follow.
   static Future<void> endCall({String reason = 'ended', bool notifyRemote = true}) async {
-    if (phase.value == CallPhase.idle && _callId == null && _pc == null) return;
+    if (phase.value == CallPhase.idle && _callId == null && _pc == null && _localStream == null) return;
     lastEndReason = reason;
     _ringTimer?.cancel();
     _ringTimer = null;
 
+    // Take ownership of everything first, so a second call cannot touch it.
     final id = _callId;
     final wasActive = phase.value != CallPhase.idle;
+    final pc = _pc;
+    final stream = _localStream;
+    final channel = _callChannel;
 
-    try {
-      await _callChannel?.unsubscribe();
-    } catch (_) {}
-    _callChannel = null;
-
-    try {
-      await _localStream?.dispose();
-    } catch (_) {}
-    try {
-      await _pc?.close();
-    } catch (_) {}
-
-    _localStream = null;
     _pc = null;
+    _localStream = null;
+    _callChannel = null;
     _callId = null;
     _remoteDescSet = false;
     _answerApplied = false;
     _remoteIceApplied = 0;
     _pendingRemoteIce.clear();
     _iceWriteChain = Future.value();
+    connectedAtMs.value = null;
+
+    // Back to idle now, so the screen closes without waiting on the network.
+    phase.value = CallPhase.idle;
+
+    await _releaseMedia(pc, stream, channel);
 
     if (notifyRemote && id != null && wasActive) {
+      unawaited(_db
+          .from('calls')
+          .update({'status': 'ended'})
+          .eq('id', id)
+          .timeout(const Duration(seconds: 5))
+          .catchError((_) {}));
+    }
+  }
+
+  /// Closes the connection and stops the microphone (clears the green mic dot).
+  static Future<void> _releaseMedia(
+    RTCPeerConnection? pc,
+    MediaStream? stream,
+    RealtimeChannel? channel,
+  ) async {
+    try {
+      await channel?.unsubscribe();
+    } catch (_) {}
+    try {
+      await pc?.close();
+    } catch (_) {}
+    for (final track in stream?.getAudioTracks() ?? const <MediaStreamTrack>[]) {
       try {
-        await _db.from('calls').update({'status': 'ended'}).eq('id', id);
+        await track.stop();
       } catch (_) {}
     }
-
-    connectedAtMs.value = null;
-    // Always end in idle so the next call can start. The UI watches for idle
-    // after a call and reads lastEndReason for the outcome.
-    phase.value = CallPhase.idle;
+    try {
+      await stream?.dispose();
+    } catch (_) {}
   }
 }
