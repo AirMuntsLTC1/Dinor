@@ -12,6 +12,8 @@ import '../chat/chat_service.dart';
 import 'ai_avatar.dart';
 import 'media_picker.dart';
 import 'emoji_picker.dart';
+import 'media_viewer.dart';
+import 'package:intl/intl.dart';
 import 'dinor_theme.dart';
 
 enum MessageStatus { sending, sent, failed }
@@ -293,7 +295,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         IconButton(
                           icon: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
                           onPressed: () {
-                            setState(() => _messages.removeAt(index));
+                            _deleteMessage(msg);
                             _closeMessageMenu();
                           },
                         ),
@@ -312,6 +314,41 @@ class _ChatScreenState extends State<ChatScreen> {
     Future.delayed(const Duration(milliseconds: 50), () {
       if (mounted && _menuOverlay != null) overlayState.insert(_menuOverlay!);
     });
+  }
+
+
+  void _deleteMessage(Message msg) {
+    // 1. Determine which messages to delete
+    List<Message> toDelete = [];
+    
+    // If it's part of a photo album, delete the whole album
+    if (msg.albumId != null) {
+      toDelete = _messages.where((m) => m.albumId == msg.albumId).toList();
+    } 
+    // Otherwise, it's a single message (Text, GIF, or Single Photo)
+    else {
+      toDelete = [msg];
+    }
+
+    // 2. INSTANTLY remove from UI (Optimistic Update)
+    setState(() {
+      _messages.removeWhere((m) => toDelete.any((d) => d.id == m.id));
+    });
+
+    // 3. Delete from Supabase in the background
+    for (var m in toDelete) {
+      // Only delete from DB if it's a real message (saved in DB)
+      if (!m.id.startsWith('temp_')) {
+        supabase.from('messages').delete().eq('id', m.id).then((_) {
+          debugPrint("Deleted message ${m.id} from Supabase");
+        }).catchError((e) {
+          debugPrint("Failed to delete message ${m.id}: $e");
+        });
+      }
+    }
+    
+    // Note: If the deleted message was the last message, the Home Screen will 
+    // automatically update its preview via real-time when the DB deletion completes.
   }
 
   void _closeMessageMenu() {
@@ -551,14 +588,32 @@ class _ChatScreenState extends State<ChatScreen> {
                   if (albumImages.isNotEmpty && albumImages.first.id == msg.id) {
                     return Align(
                       alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        width: 260,
-                        clipBehavior: Clip.hardEdge,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
+                      child: GestureDetector(
+                        onTap: () {
+                          final urls = albumImages.map((m) => m.text).toList();
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => MediaViewer(
+                                mediaUrls: urls,
+                                initialIndex: 0,
+                                senderName: msg.isMe ? "You" : widget.title,
+                                senderAvatar: "",
+                                caption: albumImages.first.caption,
+                                timestamp: DateTime.now(),
+                              ),
+                            ),
+                          );
+                        },
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          width: 260,
+                          clipBehavior: Clip.hardEdge,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: _buildAlbumGrid(albumImages, msg.isMe),
                         ),
-                        child: _buildAlbumGrid(albumImages, msg.isMe),
                       ),
                     );
                   } else {
@@ -582,7 +637,24 @@ class _ChatScreenState extends State<ChatScreen> {
                             alignment: Alignment.center,
                             children: [
                               msg.text.startsWith('http')
-                                  ? CachedNetworkImage(imageUrl: msg.text, width: 240, fit: BoxFit.cover, memCacheWidth: 480, placeholder: (c, u) => Container(width: 240, height: 200, color: Colors.grey[800], child: const Center(child: CircularProgressIndicator(color: Colors.white))))
+                                  ? GestureDetector(
+    onTap: () {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => MediaViewer(
+            mediaUrls: [msg.text],
+            initialIndex: 0,
+            senderName: msg.isMe ? "You" : widget.title,
+            senderAvatar: "",
+            caption: msg.caption,
+            timestamp: DateTime.now(),
+          ),
+        ),
+      );
+    },
+    child: CachedNetworkImage(imageUrl: msg.text, width: 240, fit: BoxFit.cover, memCacheWidth: 480, placeholder: (c, u) => Container(width: 240, height: 200, color: Colors.grey[800], child: const Center(child: CircularProgressIndicator(color: Colors.white)))),
+  )
                                   : Image.file(File(msg.text), width: 240, fit: BoxFit.cover, cacheWidth: 480),
                               if (msg.text.contains('.mp4') || msg.text.contains('video'))
                                 Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.5), shape: BoxShape.circle), child: const Icon(Icons.pause, color: Colors.white, size: 32)),
@@ -855,8 +927,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
                                       try {
                                         // 1. Pre-cache the GIF locally so it shows instantly
+                                        // CachedNetworkImage caches automatically, we just evict the old one if it exists
                                         await CachedNetworkImage.evictFromCache(url);
-                                        await precacheImage(CachedNetworkImageProvider(url), context);
 
                                         // 2. Save to database
                                         final response = await supabase.from('messages').insert({
