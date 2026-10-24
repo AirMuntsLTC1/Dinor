@@ -9,6 +9,7 @@ import 'package:photo_manager/photo_manager.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../ffi/dinor_bindings.dart';
 import '../chat/ai_service.dart';
+import '../chat/message_cache.dart';
 import '../chat/call_service.dart';
 import '../chat/chat_service.dart';
 import 'ai_avatar.dart';

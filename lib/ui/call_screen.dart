@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../chat/call_service.dart';
-import 'dinor_theme.dart';
 
 class CallScreen extends StatefulWidget {
   final String receiverName;
