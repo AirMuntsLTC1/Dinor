@@ -16,6 +16,7 @@ import 'media_picker.dart';
 import 'emoji_picker.dart';
 import 'media_viewer.dart';
 import 'dinor_theme.dart';
+import 'call_screen.dart';
 import 'skeleton_loader.dart';
 
 enum MessageStatus { sending, sent, failed }
@@ -75,7 +76,18 @@ class _ChatScreenState extends State<ChatScreen> {
     super.initState();
     if (widget.isAi) {
       _messages.add(Message('ai_1', "Hello! I am Dinor AI. Ask me anything and I'll search the web.", false));
+      _isLoadingMessages = false;
     } else {
+      // 1. INSTANT LOAD: Check if we have cached messages
+      if (widget.conversationId != null) {
+        final cached = MessageCache.getMessages(widget.conversationId!);
+        if (cached != null && cached.isNotEmpty) {
+          _messages.addAll(cached);
+          _isLoadingMessages = false; // Turn off skeleton immediately
+        }
+      }
+      
+      // 2. BACKGROUND FETCH: Connect to Supabase and update
       _initSupabaseChat();
     }
   }
@@ -120,6 +132,11 @@ class _ChatScreenState extends State<ChatScreen> {
                 ));
               });
               _scrollToBottom();
+              
+              // Update cache
+              if (_resolvedConversationId != null) {
+                MessageCache.saveMessages(_resolvedConversationId!, _messages);
+              }
             }
           }
         }
@@ -128,6 +145,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _fetchMessages() async {
     if (_resolvedConversationId == null) {
+       // If it's a new chat, create the conversation in the background
+       if (widget.otherUserId != null) {
+         final newId = await ChatService.getOrCreateConversation(widget.otherUserId!);
+         _resolvedConversationId = newId;
+         // Now that we have an ID, we can start listening
+         _initSupabaseChat(); 
+       }
        setState(() => _isLoadingMessages = false);
        return;
     }
@@ -148,6 +172,12 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       });
       _scrollToBottom();
+      
+      // 3. SAVE TO CACHE: Update the memory cache with fresh data
+      if (_resolvedConversationId != null) {
+        MessageCache.saveMessages(_resolvedConversationId!, _messages);
+      }
+      
     } catch (e) {
       debugPrint("Error fetching messages: $e");
     } finally {
@@ -210,6 +240,11 @@ class _ChatScreenState extends State<ChatScreen> {
           _messages[index] = Message(response['id'].toString(), text, true, isRead: false, status: MessageStatus.sent);
         }
       });
+      
+      // Update cache instantly
+      if (_resolvedConversationId != null) {
+        MessageCache.saveMessages(_resolvedConversationId!, _messages);
+      }
 
       await supabase.from('conversations').update({
         'last_message': text,
@@ -289,37 +324,34 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
             
-            // 2. Selected Media Carousel
+            // 2. Selected Media Carousel (Un-blurred, shrunk)
             Positioned(
               top: MediaQuery.of(context).size.height * 0.25,
+              height: MediaQuery.of(context).size.height * 0.5, // Force a height!
               left: 20,
               right: 20,
-              child: Container(
-                decoration: const BoxDecoration(
-                  color: Colors.transparent,
-                ),
-                child: PageView.builder(
-                  itemCount: _selectedAlbumImages.length,
-                  itemBuilder: (context, i) {
-                    final img = _selectedAlbumImages[i];
-                    return InteractiveViewer(
-                      minScale: 0.5,
-                      maxScale: 4.0,
-                      child: Center(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(16),
-                          child: CachedNetworkImage(
-                            imageUrl: img.text,
-                            fit: BoxFit.contain,
-                            memCacheWidth: 1000, 
-                            placeholder: (c, u) => const Center(child: CircularProgressIndicator(color: Colors.white)),
-                            errorWidget: (c, u, e) => const Icon(Icons.broken_image, color: Colors.white),
-                          ),
+              child: PageView.builder(
+                itemCount: _selectedAlbumImages.length,
+                itemBuilder: (context, i) {
+                  final img = _selectedAlbumImages[i];
+                  return InteractiveViewer(
+                    minScale: 0.5,
+                    maxScale: 4.0,
+                    child: Center(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: CachedNetworkImage(
+                          imageUrl: img.text,
+                          width: double.infinity,
+                          fit: BoxFit.contain,
+                          memCacheWidth: 1000, 
+                          placeholder: (c, u) => const Center(child: CircularProgressIndicator(color: Colors.white)),
+                          errorWidget: (c, u, e) => const Icon(Icons.broken_image, color: Colors.white),
                         ),
                       ),
-                    );
-                  },
-                ),
+                    ),
+                  );
+                },
               ),
             ),
 
@@ -752,10 +784,30 @@ class _ChatScreenState extends State<ChatScreen> {
                     if (!widget.isAi && widget.otherUserId != null && _selectedMessage == null)
                       IconButton(
                         icon: const Icon(Icons.call, color: Colors.white, size: 22),
-                        onPressed: () async {
+                        onPressed: () {
                           if (_resolvedConversationId != null && widget.otherUserId != null) {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Calling...')));
-                            await CallService.startCall(widget.otherUserId!, _resolvedConversationId!);
+                            Navigator.push(
+                              context,
+                              PageRouteBuilder(
+                                pageBuilder: (context, animation, secondaryAnimation) => CallScreen(
+                                  receiverName: widget.title,
+                                  receiverId: widget.otherUserId,
+                                  conversationId: _resolvedConversationId!,
+                                ),
+                                transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                                  return FadeTransition(
+                                    opacity: animation,
+                                    child: ScaleTransition(
+                                      scale: Tween<double>(begin: 0.9, end: 1.0).animate(
+                                        CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+                                      ),
+                                      child: child,
+                                    ),
+                                  );
+                                },
+                                transitionDuration: const Duration(milliseconds: 400),
+                              ),
+                            );
                           }
                         },
                         padding: EdgeInsets.zero,
