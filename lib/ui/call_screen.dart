@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../chat/call_service.dart';
-import '../chat/chat_service.dart';
 
 class CallScreen extends StatefulWidget {
   final String receiverName;
@@ -79,7 +79,6 @@ class _CallScreenState extends State<CallScreen> {
         
         String callDuration = _formatTime(_secondsElapsed);
         // Check if I am the caller or receiver to format the message correctly
-        final myId = supabase.auth.currentUser!.id;
         // Since this is a simple implementation, we assume the current user is the caller for this screen
         String callText = "📞 Outgoing call (Duration: $callDuration)";
         
