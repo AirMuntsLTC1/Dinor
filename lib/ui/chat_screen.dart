@@ -56,9 +56,11 @@ class _ChatScreenState extends State<ChatScreen> {
   final GlobalKey _inputKey = GlobalKey();
   bool _isAiTyping = false;
   
+  // Long press state
   Message? _selectedMessage;
   int? _selectedMessageIndex;
   OverlayEntry? _menuOverlay;
+  final GlobalKey _selectedMessageKey = GlobalKey();
 
   final supabase = Supabase.instance.client;
   RealtimeChannel? _chatChannel;
@@ -233,7 +235,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _showMessageMenu(BuildContext context, int index, Message msg) {
     _closeMessageMenu();
-    // We don't need position anymore since we blur the background and show menu centered/anchored
     setState(() {
       _selectedMessage = msg;
       _selectedMessageIndex = index;
@@ -243,33 +244,45 @@ class _ChatScreenState extends State<ChatScreen> {
       builder: (context) {
         return Stack(
           children: [
-            // Blurred Background (covers whole screen)
+            // 1. Blurred Background (Covers whole screen)
             Positioned.fill(
               child: GestureDetector(
                 onTap: _closeMessageMenu,
                 child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                  filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
                   child: Container(
-                    color: Colors.black.withValues(alpha: 0.1), // Slight tint
+                    color: Colors.black.withValues(alpha: 0.4),
                   ),
                 ),
               ),
             ),
-            // The menu itself
+            // 2. The Selected Message (Un-blurred, shrunk, centered)
             Positioned(
-              top: MediaQuery.of(context).size.height * 0.5 - 40, // Center vertically
+              top: MediaQuery.of(context).size.height * 0.3,
+              left: MediaQuery.of(context).size.width / 2 - 130, // Assuming max width 260
+              child: Material(
+                color: Colors.transparent,
+                child: Transform.scale(
+                  scale: 0.95, // Shrinks slightly
+                  child: Opacity(
+                    opacity: 1.0,
+                    child: _buildMessageBubble(msg, index, isOverlay: true),
+                  ),
+                ),
+              ),
+            ),
+            // 3. The Action Menu (Forward, Copy, Delete)
+            Positioned(
+              top: MediaQuery.of(context).size.height * 0.5,
               left: MediaQuery.of(context).size.width / 2 - 100, // Center horizontally
               child: TweenAnimationBuilder<double>(
                 tween: Tween(begin: 0.0, end: 1.0),
-                duration: const Duration(milliseconds: 300), // Smooth like Telegram
-                curve: Curves.easeOutCubic,
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutBack,
                 builder: (context, val, child) {
                   return Transform.scale(
                     scale: val,
-                    child: Opacity(
-                      opacity: val,
-                      child: child,
-                    ),
+                    child: Opacity(opacity: val, child: child),
                   );
                 },
                 child: Material(
@@ -278,7 +291,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     height: 50,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     decoration: BoxDecoration(
-                      color: DinorTheme.surfaceDark,
+                      color: const Color(0xFF1E242B),
                       borderRadius: BorderRadius.circular(25),
                       boxShadow: [
                         BoxShadow(
@@ -500,6 +513,108 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  Widget _buildMessageBubble(Message msg, int index, {bool isOverlay = false}) {
+    Widget messageBubble;
+                
+    if (msg.isImage) {
+      messageBubble = Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        child: Column(
+          crossAxisAlignment: msg.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  msg.text.startsWith('http')
+                      ? GestureDetector(
+                          onTap: isOverlay ? null : () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => MediaViewer(
+                                  mediaUrls: [msg.text],
+                                  initialIndex: 0,
+                                  senderName: msg.isMe ? "You" : widget.title,
+                                  senderAvatar: "",
+                                  caption: msg.caption,
+                                  timestamp: DateTime.now(),
+                                ),
+                              ),
+                            );
+                          },
+                          child: CachedNetworkImage(
+                            imageUrl: msg.text, 
+                            width: 240, 
+                            fit: BoxFit.cover, 
+                            memCacheWidth: 480, 
+                            placeholder: (c, u) => Container(width: 240, height: 200, color: Colors.grey[800], child: const Center(child: CircularProgressIndicator(color: Colors.white)))
+                          ),
+                        )
+                      : Image.file(File(msg.text), width: 240, fit: BoxFit.cover, cacheWidth: 480),
+                  if (msg.text.contains('.mp4') || msg.text.contains('video'))
+                    Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.5), shape: BoxShape.circle), child: const Icon(Icons.pause, color: Colors.white, size: 32)),
+                ],
+              ),
+            ),
+            if (msg.caption != null && msg.caption!.isNotEmpty)
+              Container(
+                margin: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  gradient: msg.isMe ? DinorTheme.primaryGradient : null,
+                  color: msg.isMe ? null : DinorTheme.surfaceDark,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Text(msg.caption!, style: const TextStyle(color: Colors.white, fontSize: 14)),
+              ),
+          ],
+        ),
+      );
+    } else {
+      messageBubble = Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          gradient: msg.isMe ? DinorTheme.primaryGradient : null,
+          color: msg.isMe ? null : DinorTheme.surfaceDark,
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(20),
+            topRight: const Radius.circular(20),
+            bottomLeft: msg.isMe ? const Radius.circular(20) : const Radius.circular(4),
+            bottomRight: msg.isMe ? const Radius.circular(4) : const Radius.circular(20),
+          ),
+         ),
+        child: Text(
+          msg.text, 
+          style: TextStyle(
+            color: msg.isMe 
+                ? (msg.isRead ? Colors.grey[400] : Colors.white) 
+                : Colors.white, 
+            fontSize: 16
+          )
+        ),
+      );
+    }
+
+    if (msg.isMe) {
+      messageBubble = Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          messageBubble,
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.only(right: 4.0),
+            child: _buildMessageStatus(msg),
+          ),
+        ],
+      );
+    }
+
+    return messageBubble;
+  }
+
   @override
   Widget build(BuildContext context) {
     const Color brandBlue = Color(0xFF229ED9);
@@ -524,7 +639,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 child: Row(
                   children: [
                     AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 300), // Smooth transition
+                      duration: const Duration(milliseconds: 300),
                       transitionBuilder: (Widget child, Animation<double> animation) {
                         return RotationTransition(
                           turns: animation,
@@ -607,7 +722,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
                 final msg = _messages[index];
 
-                // --- TELEGRAM ALBUM GRID LOGIC ---
+                // --- ALBUM GRID LOGIC ---
                 if (msg.isImage && msg.albumId != null) {
                   final albumImages = _messages.where((m) => m.albumId == msg.albumId).toList();
                   if (albumImages.isNotEmpty && albumImages.first.id == msg.id) {
@@ -639,30 +754,35 @@ class _ChatScreenState extends State<ChatScreen> {
                           );
                         },
                         onLongPress: () => _showMessageMenu(context, index, msg),
-                        child: Column(
-                          crossAxisAlignment: msg.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              margin: const EdgeInsets.only(bottom: 4),
-                              width: 260,
-                              clipBehavior: Clip.hardEdge,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: _buildAlbumGrid(albumImages, msg.isMe),
-                            ),
-                            if (albumCaption != null && albumCaption.isNotEmpty)
+                        child: AnimatedScale(
+                          scale: _selectedMessageIndex == index ? 0.95 : 1.0, // Shrink effect
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeOutBack,
+                          child: Column(
+                            crossAxisAlignment: msg.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                            children: [
                               Container(
-                                margin: const EdgeInsets.only(bottom: 8),
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                margin: const EdgeInsets.only(bottom: 4),
+                                width: 260,
+                                clipBehavior: Clip.hardEdge,
                                 decoration: BoxDecoration(
-                                  gradient: msg.isMe ? DinorTheme.primaryGradient : null,
-                                  color: msg.isMe ? null : DinorTheme.surfaceDark,
                                   borderRadius: BorderRadius.circular(16),
                                 ),
-                                child: Text(albumCaption, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                                child: _buildAlbumGrid(albumImages, msg.isMe),
                               ),
-                          ],
+                              if (albumCaption != null && albumCaption.isNotEmpty)
+                                Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    gradient: msg.isMe ? DinorTheme.primaryGradient : null,
+                                    color: msg.isMe ? null : DinorTheme.surfaceDark,
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: Text(albumCaption, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                                ),
+                            ],
+                          ),
                         ),
                       ),
                     );
@@ -672,121 +792,21 @@ class _ChatScreenState extends State<ChatScreen> {
                 }
                 // --- END ALBUM LOGIC ---
 
-                Widget messageBubble;
-                
-                if (msg.isImage) {
-                  messageBubble = Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    child: Column(
-                      crossAxisAlignment: msg.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(16),
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              msg.text.startsWith('http')
-                                  ? GestureDetector(
-                                      onTap: () {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (context) => MediaViewer(
-                                              mediaUrls: [msg.text],
-                                              initialIndex: 0,
-                                              senderName: msg.isMe ? "You" : widget.title,
-                                              senderAvatar: "",
-                                              caption: msg.caption,
-                                              timestamp: DateTime.now(),
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                      child: CachedNetworkImage(
-                                        imageUrl: msg.text, 
-                                        width: 240, 
-                                        fit: BoxFit.cover, 
-                                        memCacheWidth: 480, 
-                                        placeholder: (c, u) => Container(width: 240, height: 200, color: Colors.grey[800], child: const Center(child: CircularProgressIndicator(color: Colors.white)))
-                                      ),
-                                    )
-                                  : Image.file(File(msg.text), width: 240, fit: BoxFit.cover, cacheWidth: 480),
-                              if (msg.text.contains('.mp4') || msg.text.contains('video'))
-                                Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.5), shape: BoxShape.circle), child: const Icon(Icons.pause, color: Colors.white, size: 32)),
-                            ],
-                          ),
-                        ),
-                        if (msg.caption != null && msg.caption!.isNotEmpty)
-                          Container(
-                            margin: const EdgeInsets.only(top: 4),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              gradient: msg.isMe ? DinorTheme.primaryGradient : null,
-                              color: msg.isMe ? null : DinorTheme.surfaceDark,
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Text(msg.caption!, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                          ),
-                      ],
-                    ),
-                  );
-                } else {
-                  messageBubble = Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    decoration: BoxDecoration(
-                      gradient: msg.isMe ? DinorTheme.primaryGradient : null,
-                      color: msg.isMe ? null : DinorTheme.surfaceDark,
-                      borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(20),
-                        topRight: const Radius.circular(20),
-                        bottomLeft: msg.isMe ? const Radius.circular(20) : const Radius.circular(4),
-                        bottomRight: msg.isMe ? const Radius.circular(4) : const Radius.circular(20),
-                      ),
-                    ),
-                    child: Text(
-                      msg.text, 
-                      style: TextStyle(
-                        color: msg.isMe 
-                            ? (msg.isRead ? Colors.grey[400] : Colors.white) 
-                            : Colors.white, 
-                        fontSize: 16
-                      )
-                    ),
-                  );
-                }
-
-                if (msg.isMe) {
-                  messageBubble = Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      messageBubble,
-                      const SizedBox(height: 4),
-                      Padding(
-                        padding: const EdgeInsets.only(right: 4.0),
-                        child: _buildMessageStatus(msg),
-                      ),
-                    ],
-                  );
-                }
-
-                final interactiveBubble = Builder(
-                  builder: (bubbleContext) {
-                    return GestureDetector(
-                      onLongPress: () => _showMessageMenu(bubbleContext, index, msg),
-                      child: AnimatedScale(
-                        scale: _selectedMessageIndex == index ? 1.1 : 1.0,
-                        duration: const Duration(milliseconds: 200),
-                        curve: Curves.easeOutBack,
-                        child: messageBubble,
-                      ),
-                    );
-                  }
-                );
-
                 return Align(
                   alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
-                  child: interactiveBubble,
+                  child: Builder(
+                    builder: (bubbleContext) {
+                      return GestureDetector(
+                        onLongPress: () => _showMessageMenu(bubbleContext, index, msg),
+                        child: AnimatedScale(
+                          scale: _selectedMessageIndex == index ? 0.95 : 1.0, // Shrink effect
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeOutBack,
+                          child: _buildMessageBubble(msg, index),
+                        ),
+                      );
+                    }
+                  ),
                 );
               },
             ),

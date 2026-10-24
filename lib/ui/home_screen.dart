@@ -102,9 +102,10 @@ class _HomeScreenState extends State<HomeScreen> {
           builder: (context) => ChatScreen(title: name, conversationId: convId, otherUserId: otherUserId),
         ),
       ).then((_) {
-        // 4. When returning from the chat, force a fresh fetch from the database
-        // This guarantees the badge is gone
-        _fetchConversations(); 
+        // 4. When returning from the chat, wait a tiny bit for Supabase to sync, then refresh
+        Future.delayed(const Duration(milliseconds: 500), () {
+          _fetchConversations(); 
+        });
       });
     }
   }
