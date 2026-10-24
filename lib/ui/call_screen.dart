@@ -157,15 +157,12 @@ class _CallScreenState extends State<CallScreen> {
     // endCall returns to idle, which triggers _finish via the listener.
   }
 
-  @override
+@override
   void dispose() {
     _ticker?.cancel();
     CallService.phase.removeListener(_onPhaseChanged);
     CallService.connectedAtMs.removeListener(_onConnectedChanged);
-    // Leaving this screen must never leave the microphone open.
-    if (CallService.phase.value != CallPhase.idle) {
-      CallService.endCall(reason: 'ended');
-    }
+    CallService.endCall(reason: 'ended');
     super.dispose();
   }
 

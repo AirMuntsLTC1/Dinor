@@ -261,7 +261,6 @@ class CallService {
 
       _subscribe();
       _startCallPoll();
-      // Catch an answer that was written before the subscription went live.
       final current = await _db.from('calls').select().eq('id', _callId!).single();
       await _applyRow(current);
 
@@ -271,6 +270,12 @@ class CallService {
     } catch (e) {
       debugPrint('startCall failed: $e');
       lastErrorMessage = _friendly(e);
+      final id = _callId;
+      if (id != null) {
+        try {
+          await _db.from('calls').update({'status': 'ended'}).eq('id', id);
+        } catch (_) {}
+      }
       await _fail();
     }
   }
@@ -280,8 +285,8 @@ class CallService {
   // ---------------------------------------------------------------------------
 
   static Future<void> acceptCall(String callId) async {
+    _clearIncoming(); // ALWAYS stop the ringtone first
     if (phase.value != CallPhase.idle) return;
-    _clearIncoming(); // stops the ringtone
     _isCaller = false;
     _callId = callId;
     lastErrorMessage = null;
@@ -291,7 +296,6 @@ class CallService {
     try {
       var row = await _db.from('calls').select().eq('id', callId).single();
 
-      // The caller writes the offer just after creating the row, so wait briefly.
       for (var i = 0; row['offer'] == null && i < 30; i++) {
         if (row['status'] == 'ended' || row['status'] == 'declined') {
           throw StateError('The caller hung up.');
@@ -324,6 +328,9 @@ class CallService {
     } catch (e) {
       debugPrint('acceptCall failed: $e');
       lastErrorMessage = _friendly(e);
+      try {
+        await _db.from('calls').update({'status': 'ended'}).eq('id', callId);
+      } catch (_) {}
       await _fail();
     }
   }
@@ -337,6 +344,11 @@ class CallService {
     if (!mic.isGranted) {
       throw StateError('Microphone permission is off. Allow it for Dinor in Android Settings.');
     }
+    try {
+      if (!await Permission.bluetoothConnect.isGranted) {
+        await Permission.bluetoothConnect.request();
+      }
+    } catch (_) {}
     _localStream = await navigator.mediaDevices.getUserMedia({'audio': true, 'video': false});
   }
 
@@ -422,18 +434,20 @@ class CallService {
       return;
     }
 
-    // Caller: apply the answer once.
     if (_isCaller && !_answerApplied && row['answer'] != null) {
       final answer = row['answer'] as Map;
-      _answerApplied = true;
-      await pc.setRemoteDescription(
-        RTCSessionDescription(answer['sdp'] as String, answer['type'] as String),
-      );
-      _remoteDescSet = true;
-      await _flushPendingIce();
+      try {
+        await pc.setRemoteDescription(
+          RTCSessionDescription(answer['sdp'] as String, answer['type'] as String),
+        );
+        _answerApplied = true;
+        _remoteDescSet = true;
+        await _flushPendingIce();
+      } catch (e) {
+        debugPrint('setRemoteDescription(answer) failed: $e');
+      }
     }
 
-    // Remote ICE: only process entries we have not applied yet.
     final remoteColumn = _isCaller ? 'receiver_ice' : 'caller_ice';
     final remote = row[remoteColumn];
     if (remote is List && remote.length > _remoteIceApplied) {
@@ -445,7 +459,11 @@ class CallService {
           ice['sdpMLineIndex'] as int?,
         );
         if (_remoteDescSet) {
-          await pc.addCandidate(candidate);
+          try {
+            await pc.addCandidate(candidate);
+          } catch (e) {
+            debugPrint('addCandidate failed: $e');
+          }
         } else {
           _pendingRemoteIce.add(candidate);
         }
@@ -472,14 +490,14 @@ class CallService {
 
   /// Ends the call. The UI returns to idle at once; media and network cleanup follow.
   static Future<void> endCall({String reason = 'ended', bool notifyRemote = true}) async {
-    if (phase.value == CallPhase.idle && _callId == null && _pc == null && _localStream == null) return;
+    final hasResources = _pc != null || _localStream != null || _callId != null;
+    if (phase.value == CallPhase.idle && !hasResources) return;
     lastEndReason = reason;
     _ringTimer?.cancel();
     _ringTimer = null;
     _callPoll?.cancel();
     _callPoll = null;
 
-    // Take ownership of everything first, so a second call cannot touch it.
     final id = _callId;
     final wasActive = phase.value != CallPhase.idle;
     final pc = _pc;
@@ -497,10 +515,9 @@ class CallService {
     _iceWriteChain = Future.value();
     connectedAtMs.value = null;
 
-    // Back to idle now, so the screen closes without waiting on the network.
-    phase.value = CallPhase.idle;
-
     await _releaseMedia(pc, stream, channel);
+
+    phase.value = CallPhase.idle;
 
     if (notifyRemote && id != null && wasActive) {
       unawaited(_db
@@ -518,19 +535,27 @@ class CallService {
     MediaStream? stream,
     RealtimeChannel? channel,
   ) async {
-    try {
-      await channel?.unsubscribe();
-    } catch (_) {}
-    try {
-      await pc?.close();
-    } catch (_) {}
     for (final track in stream?.getAudioTracks() ?? const <MediaStreamTrack>[]) {
       try {
-        await track.stop();
-      } catch (_) {}
+        await track.stop().timeout(const Duration(seconds: 2));
+      } catch (e) {
+        debugPrint('track.stop: $e');
+      }
     }
     try {
-      await stream?.dispose();
-    } catch (_) {}
+      await stream?.dispose().timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('stream.dispose: $e');
+    }
+    try {
+      await pc?.close().timeout(const Duration(seconds: 3));
+    } catch (e) {
+      debugPrint('pc.close: $e');
+    }
+    try {
+      await channel?.unsubscribe().timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('unsubscribe: $e');
+    }
   }
 }
