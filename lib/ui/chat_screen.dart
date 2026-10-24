@@ -69,6 +69,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   final supabase = Supabase.instance.client;
   RealtimeChannel? _chatChannel;
+  Timer? _pollTimer;
+  String? _lastCreatedAt;
   String? _currentUserId;
   String? _resolvedConversationId;
 
@@ -122,6 +124,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
     // 3. Subscribe first, then fetch, so no message can slip between the two.
     _subscribeRealtime(convId);
+    // Fallback: check for new messages every few seconds, in case Realtime lags.
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _pollNewMessages());
     await _fetchMessages();
     ChatService.markAsRead(convId);
   }
@@ -147,6 +152,10 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Adds a server row exactly once. When our own message echoes back over
   /// realtime, it replaces the pending bubble instead of appearing twice.
   void _ingest(Map<String, dynamic> row) {
+    final createdAt = row['created_at']?.toString();
+    if (createdAt != null && (_lastCreatedAt == null || createdAt.compareTo(_lastCreatedAt!) > 0)) {
+      _lastCreatedAt = createdAt;
+    }
     final id = row['id'].toString();
     if (_messages.any((m) => m.id == id)) return;
 
@@ -181,7 +190,9 @@ class _ChatScreenState extends State<ChatScreen> {
           .order('created_at', ascending: true);
       if (!mounted) return;
 
-      final server = List<Map<String, dynamic>>.from(data).map(_rowToMessage).toList();
+      final rawRows = List<Map<String, dynamic>>.from(data);
+      if (rawRows.isNotEmpty) _lastCreatedAt = rawRows.last['created_at']?.toString();
+      final server = rawRows.map(_rowToMessage).toList();
       final serverIds = server.map((m) => m.id).toSet();
       final localPending = _messages.where((m) => m.id.startsWith('temp_') && !serverIds.contains(m.id)).toList();
       final next = [...server, ...localPending];
@@ -249,8 +260,29 @@ class _ChatScreenState extends State<ChatScreen> {
     LocalCache.saveMessages(convId, rows);
   }
 
+  /// Polling fallback: fetches only messages newer than the last one we have.
+  Future<void> _pollNewMessages() async {
+    final convId = _resolvedConversationId;
+    if (convId == null || !mounted) return;
+    try {
+      final rows = await supabase
+          .from('messages')
+          .select()
+          .eq('conversation_id', convId)
+          .gt('created_at', _lastCreatedAt ?? '1970-01-01T00:00:00+00:00')
+          .order('created_at', ascending: true);
+      for (final row in List<Map<String, dynamic>>.from(rows)) {
+        if (!mounted) return;
+        _ingest(row);
+      }
+    } catch (e) {
+      debugPrint('message poll: $e');
+    }
+  }
+
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _menuOverlay?.remove();
     _menuOverlay = null;
     _chatChannel?.unsubscribe();

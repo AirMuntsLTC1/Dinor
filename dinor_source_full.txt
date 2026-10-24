@@ -10,16 +10,75 @@ import 'ui/login_screen.dart';
 import 'ui/home_screen.dart';
 import 'ui/dinor_theme.dart';
 import 'ui/internet_banner.dart';
+import 'chat/message_cache.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  await Supabase.initialize(
-    url: 'https://skvgbzftnbditpztqewl.supabase.co',
-    publishableKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNrdmdiemZ0bmJkaXRwenRxZXdsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI3NDA1NDEsImV4cCI6MjEwODMxNjU0MX0.zHDtiHxAUBb-n2HpXjBbOHaO58pp4SgF__r9zq5JmkM',
-  );
-  
-  runApp(const DinorApp());
+  // Draw the first frame immediately; startup work happens behind the splash.
+  runApp(const DinorBootstrap());
+}
+
+/// Runs the slow startup work (Supabase, local cache) while a splash is shown.
+class DinorBootstrap extends StatefulWidget {
+  const DinorBootstrap({super.key});
+
+  @override
+  State<DinorBootstrap> createState() => _DinorBootstrapState();
+}
+
+class _DinorBootstrapState extends State<DinorBootstrap> {
+  late Future<void> _startup = _init();
+
+  static Future<void> _init() async {
+    // Run independent work in parallel: cache read and Supabase setup.
+    await Future.wait([
+      LocalCache.preload(),
+      Supabase.initialize(
+        url: 'https://skvgbzftnbditpztqewl.supabase.co',
+        publishableKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNrdmdiemZ0bmJkaXRwenRxZXdsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI3NDA1NDEsImV4cCI6MjEwODMxNjU0MX0.zHDtiHxAUBb-n2HpXjBbOHaO58pp4SgF__r9zq5JmkM',
+      ),
+    ]);
+  }
+
+  void _retry() => setState(() => _startup = _init());
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<void>(
+      future: _startup,
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.done && !snap.hasError) {
+          return const DinorApp();
+        }
+        if (snap.hasError) {
+          return MaterialApp(
+            debugShowCheckedModeBanner: false,
+            theme: ThemeData(brightness: Brightness.dark, scaffoldBackgroundColor: DinorTheme.bgDark, useMaterial3: true),
+            home: Scaffold(
+              body: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text("Couldn't start Dinor", style: TextStyle(color: Colors.white, fontSize: 18)),
+                    const SizedBox(height: 12),
+                    TextButton(onPressed: _retry, child: const Text('Retry', style: TextStyle(color: DinorTheme.brandBlue))),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(brightness: Brightness.dark, scaffoldBackgroundColor: DinorTheme.bgDark, useMaterial3: true),
+          home: const Scaffold(
+            backgroundColor: DinorTheme.bgDark,
+            body: Center(child: Text('Dinor', style: TextStyle(color: DinorTheme.brandBlue, fontSize: 32, fontWeight: FontWeight.bold))),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class DinorApp extends StatelessWidget {
@@ -69,21 +128,17 @@ class AuthGate extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final auth = Supabase.instance.client.auth;
     return StreamBuilder<AuthState>(
-      stream: Supabase.instance.client.auth.onAuthStateChange,
+      stream: auth.onAuthStateChange,
+      // Seed with the current session so the right screen shows on the first frame.
+      initialData: AuthState(AuthChangeEvent.initialSession, auth.currentSession),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            backgroundColor: DinorTheme.bgDark,
-            body: Center(child: CircularProgressIndicator(color: DinorTheme.brandBlue)),
-          );
-        }
-        final session = snapshot.data?.session ?? Supabase.instance.client.auth.currentSession;
+        final session = snapshot.data?.session ?? auth.currentSession;
         if (session != null) {
           return const HomeScreen();
-        } else {
-          return const LoginScreen();
         }
+        return const LoginScreen();
       },
     );
   }
@@ -94,26 +149,26 @@ class AuthGate extends StatelessWidget {
 FILE: lib/ffi/dinor_bindings.dart
 ============================================================
 
+import 'dart:convert';
 import 'dart:ffi';
+
 import 'package:ffi/ffi.dart';
 
+// ---- C signatures ----------------------------------------------------------
 typedef _VersionC = Pointer<Utf8> Function();
 typedef _VersionD = Pointer<Utf8> Function();
 
-typedef _EncryptC = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Int32);
-typedef _EncryptD = int Function(Pointer<Utf8>, Pointer<Utf8>, int);
+typedef _Utf8LenC = Int32 Function(Pointer<Utf8>);
+typedef _Utf8LenD = int Function(Pointer<Utf8>);
+
+typedef _TextFnC = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Int32);
+typedef _TextFnD = int Function(Pointer<Utf8>, Pointer<Utf8>, int);
 
 typedef _SearchC = Int32 Function(Pointer<Utf8>, Pointer<Utf8>);
 typedef _SearchD = int Function(Pointer<Utf8>, Pointer<Utf8>);
 
-typedef _FormatC = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Int32);
-typedef _FormatD = int Function(Pointer<Utf8>, Pointer<Utf8>, int);
-
-typedef _AiExtractC = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Int32);
-typedef _AiExtractD = int Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, int);
-
-typedef _SanitizeC = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Int32);
-typedef _SanitizeD = int Function(Pointer<Utf8>, Pointer<Utf8>, int);
+typedef _ExtractC = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Int32);
+typedef _ExtractD = int Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, int);
 
 typedef _HashC = Int32 Function(Pointer<Utf8>);
 typedef _HashD = int Function(Pointer<Utf8>);
@@ -127,113 +182,240 @@ typedef _StatusD = Pointer<Utf8> Function(int);
 typedef _TimestampC = Int64 Function();
 typedef _TimestampD = int Function();
 
-typedef _BatchSanitizeC = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Int32);
-typedef _BatchSanitizeD = int Function(Pointer<Utf8>, Pointer<Utf8>, int);
+typedef _StaleC = Int32 Function(Int64, Int64, Int64);
+typedef _StaleD = int Function(int, int, int);
 
+typedef _RetryC = Int64 Function(Int32, Int64, Int64);
+typedef _RetryD = int Function(int, int, int);
+
+/// Thin, cached wrapper around libdinor_core.so.
+///
+/// * One library handle for the whole app (never reopened per frame).
+/// * Buffers are sized from UTF-8 byte length, not Dart's UTF-16 length.
+/// * If the native library is missing, every method falls back to pure Dart
+///   so the app keeps working instead of crashing.
 class DinorCore {
-  final DynamicLibrary _lib;
-  DinorCore._(this._lib);
+  DinorCore._(DynamicLibrary? lib)
+      : _lib = lib,
+        _version = lib == null ? null : _try(() => lib.lookupFunction<_VersionC, _VersionD>('dinor_version')),
+        _utf8Len = lib == null ? null : _try(() => lib.lookupFunction<_Utf8LenC, _Utf8LenD>('dinor_utf8_length')),
+        _encrypt = lib == null ? null : _try(() => lib.lookupFunction<_TextFnC, _TextFnD>('dinor_encrypt')),
+        _format = lib == null ? null : _try(() => lib.lookupFunction<_TextFnC, _TextFnD>('dinor_format_message')),
+        _sanitize = lib == null ? null : _try(() => lib.lookupFunction<_TextFnC, _TextFnD>('dinor_sanitize_input')),
+        _batchSanitize = lib == null ? null : _try(() => lib.lookupFunction<_TextFnC, _TextFnD>('dinor_batch_sanitize')),
+        _escapeLike = lib == null ? null : _try(() => lib.lookupFunction<_TextFnC, _TextFnD>('dinor_escape_like')),
+        _search = lib == null ? null : _try(() => lib.lookupFunction<_SearchC, _SearchD>('dinor_fast_search')),
+        _extract = lib == null ? null : _try(() => lib.lookupFunction<_ExtractC, _ExtractD>('dinor_extract_web_answer')),
+        _hash = lib == null ? null : _try(() => lib.lookupFunction<_HashC, _HashD>('dinor_calculate_hash')),
+        _animation = lib == null ? null : _try(() => lib.lookupFunction<_AnimationC, _AnimationD>('dinor_animation_scale')),
+        _status = lib == null ? null : _try(() => lib.lookupFunction<_StatusC, _StatusD>('dinor_get_status_icon')),
+        _timestamp = lib == null ? null : _try(() => lib.lookupFunction<_TimestampC, _TimestampD>('dinor_fast_timestamp')),
+        _stale = lib == null ? null : _try(() => lib.lookupFunction<_StaleC, _StaleD>('dinor_is_stale')),
+        _retry = lib == null ? null : _try(() => lib.lookupFunction<_RetryC, _RetryD>('dinor_retry_delay_ms'));
 
-  factory DinorCore.load() =>
-      DinorCore._(DynamicLibrary.open('libdinor_core.so'));
+  static DinorCore? _instance;
 
+  /// Looks up one symbol; a missing symbol yields null (Dart fallback) instead of throwing.
+  static T? _try<T>(T Function() lookup) {
+    try {
+      return lookup();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  final DynamicLibrary? _lib;
+
+  final _VersionD? _version;
+  final _Utf8LenD? _utf8Len;
+  final _TextFnD? _encrypt;
+  final _TextFnD? _format;
+  final _TextFnD? _sanitize;
+  final _TextFnD? _batchSanitize;
+  final _TextFnD? _escapeLike;
+  final _SearchD? _search;
+  final _ExtractD? _extract;
+  final _HashD? _hash;
+  final _AnimationD? _animation;
+  final _StatusD? _status;
+  final _TimestampD? _timestamp;
+  final _StaleD? _stale;
+  final _RetryD? _retry;
+
+  /// True when libdinor_core.so loaded successfully.
+  bool get isNative => _lib != null;
+
+  /// Returns the shared instance. Safe to call on every frame: it is cached,
+  /// and the library is opened at most once per app run.
+  factory DinorCore.load() {
+    final existing = _instance;
+    if (existing != null) return existing;
+    DynamicLibrary? lib;
+    try {
+      lib = DynamicLibrary.open('libdinor_core.so');
+    } catch (_) {
+      lib = null; // no native library: use Dart implementations
+    }
+    return _instance = DinorCore._(lib);
+  }
+
+  // ---- helpers -------------------------------------------------------------
+  static int _bytes(String s) => utf8.encode(s).length;
+
+  String _runText(_TextFnD? fn, String input, {int? outFactor}) {
+    if (fn == null) return input;
+    final inPtr = input.toNativeUtf8();
+    final outSize = _bytes(input) * (outFactor ?? 1) + 1;
+    final out = calloc<Uint8>(outSize).cast<Utf8>();
+    try {
+      final n = fn(inPtr, out, outSize);
+      return n < 0 ? input : out.toDartString();
+    } finally {
+      calloc.free(inPtr);
+      calloc.free(out);
+    }
+  }
+
+  // ---- identity ------------------------------------------------------------
   String version() {
-    final fn = _lib.lookupFunction<_VersionC, _VersionD>('dinor_version');
-    return fn().toDartString();
+    if (_version == null) return 'Dinor (Dart fallback)';
+    return _version().toDartString();
   }
 
+  int utf8Length(String text) {
+    if (_utf8Len == null) return _bytes(text);
+    final p = text.toNativeUtf8();
+    try {
+      return _utf8Len(p);
+    } finally {
+      calloc.free(p);
+    }
+  }
+
+  // ---- text ----------------------------------------------------------------
+  /// Reversible obfuscation (not encryption) kept for compatibility.
   String encrypt(String text) {
-    final fn = _lib.lookupFunction<_EncryptC, _EncryptD>('dinor_encrypt');
-    final input = text.toNativeUtf8();
-    final out = calloc<Uint8>(text.length + 1).cast<Utf8>();
-    final n = fn(input, out, text.length + 1);
-    final result = n < 0 ? '' : out.toDartString();
-    calloc.free(input);
-    calloc.free(out);
-    return result;
+    if (_encrypt == null) return String.fromCharCodes(text.runes.toList().reversed);
+    return _runText(_encrypt, text);
   }
 
-  // New: Search using C++
   bool search(String haystack, String needle) {
-    final fn = _lib.lookupFunction<_SearchC, _SearchD>('dinor_fast_search');
+    if (_search == null) {
+      return haystack.toLowerCase().contains(needle.toLowerCase());
+    }
     final h = haystack.toNativeUtf8();
     final n = needle.toNativeUtf8();
-    final result = fn(h, n);
-    calloc.free(h);
-    calloc.free(n);
-    return result == 1;
+    try {
+      return _search(h, n) == 1;
+    } finally {
+      calloc.free(h);
+      calloc.free(n);
+    }
   }
 
-  // New: Format text using C++
   String extractAiAnswer(String query, String webText) {
-    final fn = _lib.lookupFunction<_AiExtractC, _AiExtractD>('dinor_extract_web_answer');
+    if (_extract == null) return '';
     final q = query.toNativeUtf8();
     final w = webText.toNativeUtf8();
-    final out = calloc<Uint8>(512).cast<Utf8>(); // Max 512 bytes for answer
-    
-    final n = fn(q, w, out, 512);
-    final result = n < 0 ? '' : out.toDartString();
-    
-    calloc.free(q);
-    calloc.free(w);
-    calloc.free(out);
-    return result;
+    const outSize = 512;
+    final out = calloc<Uint8>(outSize).cast<Utf8>();
+    try {
+      final n = _extract(q, w, out, outSize);
+      return n < 0 ? '' : out.toDartString();
+    } finally {
+      calloc.free(q);
+      calloc.free(w);
+      calloc.free(out);
+    }
   }
 
   String sanitizeInput(String text) {
-    final fn = _lib.lookupFunction<_SanitizeC, _SanitizeD>('dinor_sanitize_input');
-    final input = text.toNativeUtf8();
-    final out = calloc<Uint8>(text.length + 2).cast<Utf8>();
-    final n = fn(input, out, text.length + 2);
-    final result = n < 0 ? text : out.toDartString();
-    calloc.free(input);
-    calloc.free(out);
-    return result;
+    if (_sanitize == null) {
+      return text.replaceAll(RegExp(r'[\u0000-\u0009\u000B-\u001F\u007F]'), '');
+    }
+    return _runText(_sanitize, text);
   }
+
+  /// Sanitizes, collapses whitespace and trims. Used before every send.
+  String batchSanitize(String text) {
+    if (_batchSanitize == null) {
+      return text.replaceAll(RegExp(r'[\r\n\t]+'), ' ').replaceAll(RegExp(r' {2,}'), ' ').trim();
+    }
+    return _runText(_batchSanitize, text);
+  }
+
+  String escapeLike(String text) {
+    if (_escapeLike == null) {
+      return text.replaceAllMapped(RegExp(r'[%_\\]'), (m) => '\\${m[0]}');
+    }
+    return _runText(_escapeLike, text, outFactor: 2);
+  }
+
+  String formatMessage(String text) => _runText(_format, text);
 
   int calculateHash(String text) {
-    final fn = _lib.lookupFunction<_HashC, _HashD>('dinor_calculate_hash');
-    final input = text.toNativeUtf8();
-    final result = fn(input);
-    calloc.free(input);
-    return result;
+    if (_hash == null) {
+      var h = 5381;
+      for (final c in utf8.encode(text)) {
+        h = ((h << 5) + h + c) & 0x7FFFFFFF;
+      }
+      return h;
+    }
+    final p = text.toNativeUtf8();
+    try {
+      return _hash(p);
+    } finally {
+      calloc.free(p);
+    }
   }
 
-  double getAnimationScale(double timeSeconds, int dotIndex) {
-    final fn = _lib.lookupFunction<_AnimationC, _AnimationD>('dinor_animation_scale');
-    return fn(timeSeconds, dotIndex);
-  }
-
+  // ---- timing / cache ------------------------------------------------------
   int getFastTimestamp() {
-    final fn = _lib.lookupFunction<_TimestampC, _TimestampD>('dinor_fast_timestamp');
-    return fn();
+    if (_timestamp == null) return DateTime.now().millisecondsSinceEpoch;
+    return _timestamp();
   }
 
-  String batchSanitize(String text) {
-    final fn = _lib.lookupFunction<_BatchSanitizeC, _BatchSanitizeD>('dinor_batch_sanitize');
-    final input = text.toNativeUtf8();
-    final out = calloc<Uint8>(text.length + 2).cast<Utf8>();
-    final n = fn(input, out, text.length + 2);
-    final result = n < 0 ? text : out.toDartString();
-    calloc.free(input);
-    calloc.free(out);
-    return result;
+  /// True when a cache entry saved at [savedAtMs] is older than [ttlMs].
+  bool isStale({required int savedAtMs, required int ttlMs, int? nowMs}) {
+    final now = nowMs ?? DateTime.now().millisecondsSinceEpoch;
+    if (_stale == null) {
+      if (savedAtMs <= 0 || ttlMs <= 0 || now < savedAtMs) return true;
+      return now - savedAtMs > ttlMs;
+    }
+    return _stale(savedAtMs, ttlMs, now) == 1;
+  }
+
+  /// Exponential backoff delay in ms for retry [attempt] (0-based).
+  int retryDelayMs(int attempt, {int baseMs = 250, int capMs = 4000}) {
+    if (_retry == null) {
+      final shift = attempt < 0 ? 0 : (attempt > 30 ? 30 : attempt);
+      final d = baseMs * (1 << shift);
+      return d > capMs ? capMs : d;
+    }
+    return _retry(attempt, baseMs, capMs);
+  }
+
+  // ---- animation / status --------------------------------------------------
+  double getAnimationScale(double timeSeconds, int dotIndex) {
+    if (_animation == null) {
+      final delay = dotIndex * 0.2;
+      var progress = (timeSeconds - delay) % 1.0;
+      if (progress < 0) progress += 1.0;
+      return 1.0 + (0.6 * (progress < 0.5 ? progress * 2 : (1 - progress) * 2));
+    }
+    return _animation(timeSeconds, dotIndex);
   }
 
   String getStatusIcon(int statusCode) {
-    final fn = _lib.lookupFunction<_StatusC, _StatusD>('dinor_get_status_icon');
-    return fn(statusCode).toDartString();
-  }
-
-  String formatMessage(String text) {
-    final fn = _lib.lookupFunction<_FormatC, _FormatD>('dinor_format_message');
-    final input = text.toNativeUtf8();
-    final out = calloc<Uint8>(text.length + 2).cast<Utf8>();
-    final n = fn(input, out, text.length + 2);
-    final result = n < 0 ? text : out.toDartString();
-    calloc.free(input);
-    calloc.free(out);
-    return result;
+    if (_status == null) {
+      switch (statusCode) {
+        case 0: return 'sending';
+        case 1: return 'sent';
+        case 2: return 'failed';
+        default: return 'unknown';
+      }
+    }
+    return _status(statusCode).toDartString();
   }
 }
 
@@ -242,10 +424,16 @@ class DinorCore {
 FILE: lib/ui/home_screen.dart
 ============================================================
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../chat/chat_service.dart';
+import '../chat/call_service.dart';
+import '../chat/message_cache.dart';
+import 'call_screen.dart';
+import 'skeleton_loader.dart';
 import 'chat_screen.dart';
 import 'ai_avatar.dart';
 import 'bottom_nav.dart';
@@ -264,37 +452,76 @@ class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
   int _drawerPage = 0;
   final supabase = Supabase.instance.client;
-  
+
   List<Map<String, dynamic>> _conversations = [];
   List<Map<String, dynamic>> _searchResults = [];
   bool _isSearching = false;
-  bool _isLoading = true; // Startup loading state
+  bool _isLoading = true; // true only when there is no cached list to show
   final FocusNode _searchFocus = FocusNode();
+
+  RealtimeChannel? _convChannel;
+  Timer? _refreshDebounce;
+  Timer? _searchDebounce;
+  int _fetchSeq = 0;   // drops out-of-order conversation responses
+  int _searchSeq = 0;  // drops out-of-order search responses
+  bool _incomingDialogOpen = false;
+  BuildContext? _dialogContext;
 
   @override
   void initState() {
     super.initState();
+
+    // 1. Paint instantly from the local cache (no spinner on startup).
+    final cached = LocalCache.peekConversations();
+    if (cached != null) {
+      _conversations = cached;
+      _isLoading = false;
+    }
+
+    // 2. Refresh from the network in the background.
     _fetchConversations();
-    
-    // Listen to realtime updates
-    supabase.channel('public:conversations_refresh')
-      .onPostgresChanges(
-        event: PostgresChangeEvent.all,
-        schema: 'public',
-        table: 'conversations',
-        callback: (payload) => _fetchConversations(),
-      ).subscribe();
+
+    // 3. Realtime updates, debounced so bursts trigger one refresh.
+    _subscribeRealtime();
+
+    // 4. Calls addressed to this user.
+    CallService.startIncomingListener();
+    CallService.incoming.addListener(_onIncomingCall);
+  }
+
+  void _subscribeRealtime() {
+    final me = supabase.auth.currentUser?.id;
+    if (me == null) return;
+    _convChannel?.unsubscribe();
+    _convChannel = supabase.channel('conversations:$me').onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'conversations',
+      callback: (_) => _scheduleRefresh(),
+    ).subscribe();
+  }
+
+  void _scheduleRefresh() {
+    _refreshDebounce?.cancel();
+    _refreshDebounce = Timer(const Duration(milliseconds: 300), _fetchConversations);
   }
 
   @override
   void dispose() {
+    _refreshDebounce?.cancel();
+    _searchDebounce?.cancel();
+    _convChannel?.unsubscribe();
+    CallService.incoming.removeListener(_onIncomingCall);
     _searchFocus.dispose();
     super.dispose();
   }
 
   Future<void> _fetchConversations() async {
+    final seq = ++_fetchSeq;
     try {
       final data = await ChatService.getMyConversations();
+      if (seq != _fetchSeq) return; // a newer fetch is already in flight
+      LocalCache.saveConversations(data); // fire-and-forget persistence
       if (mounted) {
         setState(() {
           _conversations = data;
@@ -302,56 +529,122 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     } catch (e) {
-      debugPrint("Error fetching conversations: $e");
+      debugPrint('Error fetching conversations: $e');
+      // Keep showing cached data on failure; only stop the skeleton.
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  void _onSearchChanged(String query) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 250), () => _searchUsers(query));
+  }
+
   Future<void> _searchUsers(String query) async {
-    if (query.isEmpty) {
-      setState(() { _isSearching = false; _searchResults = []; });
+    final seq = ++_searchSeq;
+    if (query.trim().isEmpty) {
+      if (mounted) setState(() { _isSearching = false; _searchResults = []; });
       return;
     }
-    setState(() => _isSearching = true);
+    if (mounted) setState(() => _isSearching = true);
     try {
       final results = await ChatService.searchUsers(query);
-      setState(() => _searchResults = results);
+      if (seq == _searchSeq && mounted) setState(() => _searchResults = results);
     } catch (e) {
-      debugPrint("Search error: $e");
-      setState(() => _searchResults = []);
+      debugPrint('Search error: $e');
+      if (seq == _searchSeq && mounted) setState(() => _searchResults = []);
     }
   }
 
-  Future<void> _openChat(String otherUserId, String name) async {
-    _searchFocus.unfocus();
-    
-    // 1. Find the conversation ID
-    final convId = await ChatService.getOrCreateConversation(otherUserId);
-    
-    if (mounted) {
-      // 2. Clear unread count locally INSTANTLY in the UI before we even open the chat
-      setState(() {
-        for (var conv in _conversations) {
-          if (conv['id'] == convId) {
-            conv['unread_count'] = 0;
-            conv['latest_unread'] = null;
-          }
-        }
-      });
+  String _initial(String? name) =>
+      (name != null && name.isNotEmpty) ? name[0].toUpperCase() : '?';
 
-      // 3. Open the chat
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ChatScreen(title: name, conversationId: convId, otherUserId: otherUserId),
-        ),
-      ).then((_) {
-        // 4. When returning from the chat, wait a tiny bit for Supabase to sync, then refresh
-        Future.delayed(const Duration(milliseconds: 500), () {
-          _fetchConversations(); 
-        });
-      });
+  Future<void> _openChat(String otherUserId, String name, {String? knownConvId}) async {
+    _searchFocus.unfocus();
+
+    // Existing chats already know their id: open immediately, no network wait.
+    String convId = knownConvId ?? '';
+    if (convId.isEmpty) {
+      try {
+        convId = await ChatService.getOrCreateConversation(otherUserId);
+      } catch (e) {
+        debugPrint('Could not open chat: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Couldn't open chat. Try again.")));
+        }
+        return;
+      }
     }
+
+    if (!mounted) return;
+    // Clear the unread badge instantly; the list refreshes when the chat closes.
+    setState(() {
+      for (var conv in _conversations) {
+        if (conv['id'] == convId) {
+          conv['unread_count'] = 0;
+          conv['latest_unread'] = null;
+        }
+      }
+    });
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChatScreen(title: name, conversationId: convId, otherUserId: otherUserId),
+      ),
+    ).then((_) => _scheduleRefresh());
+  }
+
+  void _onIncomingCall() {
+    final call = CallService.incoming.value;
+    if (!mounted) return;
+
+    if (call == null) {
+      // Caller hung up, or the call was answered elsewhere: close the prompt.
+      if (_incomingDialogOpen && _dialogContext != null) {
+        try {
+          Navigator.of(_dialogContext!).pop(); // null result: no decline sent
+        } catch (_) {}
+      }
+      return;
+    }
+    if (_incomingDialogOpen) return;
+    _incomingDialogOpen = true;
+
+    showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        _dialogContext = ctx;
+        return AlertDialog(
+          backgroundColor: DinorTheme.surfaceDark,
+          title: const Text('Incoming call', style: TextStyle(color: Colors.white)),
+          content: Text('${call.callerName} is calling you', style: const TextStyle(color: DinorTheme.textGrey)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Decline', style: TextStyle(color: Colors.redAccent))),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Answer', style: TextStyle(color: DinorTheme.brandBlue))),
+          ],
+        );
+      },
+    ).then((accepted) {
+      _incomingDialogOpen = false;
+      _dialogContext = null;
+      if (accepted == true && mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CallScreen(
+              receiverName: call.callerName,
+              receiverId: call.callerId,
+              conversationId: call.conversationId,
+              incomingCallId: call.callId,
+            ),
+          ),
+        );
+      } else if (accepted == false) {
+        CallService.declineCall(call.callId);
+      }
+    });
   }
 
   @override
@@ -392,7 +685,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: TextField(
                   focusNode: _searchFocus,
                   autofocus: false,
-                  onChanged: _searchUsers,
+                  onChanged: _onSearchChanged,
                   style: const TextStyle(color: Colors.white),
                   decoration: const InputDecoration(hintText: 'Search users...', hintStyle: TextStyle(color: DinorTheme.textGrey), prefixIcon: Icon(Icons.search, color: DinorTheme.textGrey), border: InputBorder.none, contentPadding: EdgeInsets.symmetric(vertical: 14)),
                 ),
@@ -427,7 +720,7 @@ class _HomeScreenState extends State<HomeScreen> {
             // Loading / Chat List
             Expanded(
               child: _isLoading 
-                ? const Center(child: CircularProgressIndicator(color: brandBlue))
+                ? const ConversationListSkeleton()
                 : ListView.separated(
                 itemCount: _isSearching ? _searchResults.length : _conversations.length,
                 separatorBuilder: (context, index) => const SizedBox(height: 4),
@@ -435,8 +728,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   if (_isSearching) {
                     final user = _searchResults[index];
                     return ListTile(
-                      leading: CircleAvatar(backgroundColor: brandBlue, child: Text(user['username'][0].toUpperCase())),
-                      title: Text(user['username'], style: const TextStyle(color: Colors.white)),
+                      leading: CircleAvatar(backgroundColor: brandBlue, child: Text(_initial(user['username'] as String?))),
+                      title: Text((user['username'] ?? '') as String, style: const TextStyle(color: Colors.white)),
                       onTap: () => _openChat(user['id'], user['username']),
                     );
                   } else {
@@ -454,7 +747,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: ListTile(
                         hoverColor: Colors.transparent, splashColor: Colors.transparent, focusColor: Colors.transparent,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        leading: CircleAvatar(backgroundColor: brandBlue.withValues(alpha: 0.15), child: Text(otherName[0].toUpperCase(), style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold))),
+                        leading: CircleAvatar(backgroundColor: brandBlue.withValues(alpha: 0.15), child: Text(_initial(otherName), style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold))),
                         title: Text(otherName, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
                         subtitle: Text(
                           conv['last_message'] ?? 'No messages yet', 
@@ -502,7 +795,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                           ],
                         ),
-                        onTap: () => _openChat(otherId, otherName),
+                        onTap: () => _openChat(otherId, otherName, knownConvId: conv['id'] as String?),
                       ),
                     );
                   }
@@ -547,6 +840,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../ffi/dinor_bindings.dart';
 import '../chat/ai_service.dart';
 import '../chat/message_cache.dart';
+import '../chat/call_service.dart';
 import '../chat/chat_service.dart';
 import 'ai_avatar.dart';
 import 'media_picker.dart';
@@ -615,115 +909,180 @@ class _ChatScreenState extends State<ChatScreen> {
       _messages.add(Message('ai_1', "Hello! I am Dinor AI. Ask me anything and I'll search the web.", false));
       _isLoadingMessages = false;
     } else {
-      // 1. INSTANT LOAD: Check if we have cached messages
-      if (widget.conversationId != null) {
-        final cached = MessageCache.getMessages(widget.conversationId!);
-        if (cached != null && cached.isNotEmpty) {
-          _messages.addAll(cached);
-          _isLoadingMessages = false; // Turn off skeleton immediately
-        }
+      _currentUserId = supabase.auth.currentUser?.id;
+      _resolvedConversationId = widget.conversationId;
+      // Paint cached messages before the first frame: no skeleton, no flash.
+      final cached = widget.conversationId == null ? null : LocalCache.peekMessages(widget.conversationId!);
+      if (cached != null && cached.isNotEmpty) {
+        _messages.addAll(cached.map(_rowToMessage));
+        _isLoadingMessages = false;
+        _jumpToBottom();
       }
-      
-      // 2. BACKGROUND FETCH: Connect to Supabase and update
-      _initSupabaseChat();
+      _loadChat();
     }
   }
 
-  Future<void> _initSupabaseChat() async {
-    _currentUserId = supabase.auth.currentUser?.id;
-    
-    // If we don't have a conversation ID yet (new chat), create it
-    if (_resolvedConversationId == null && widget.otherUserId != null) {
-      final newId = await ChatService.getOrCreateConversation(widget.otherUserId!);
-      // We can't update the widget's final field, so we'll use a local state variable
-      _resolvedConversationId = newId;
-    } else {
-      _resolvedConversationId = _resolvedConversationId;
-    }
+  Message _rowToMessage(Map<String, dynamic> row) => Message(
+        row['id'].toString(),
+        (row['content'] ?? '').toString(),
+        row['sender_id'] == _currentUserId,
+        isImage: row['is_image'] ?? false,
+        isRead: row['is_read'] ?? false,
+        albumId: row['album_id'] as String?,
+        caption: row['caption'] as String?,
+      );
 
-    if (_resolvedConversationId != null) {
-      ChatService.markAsRead(_resolvedConversationId!);
-    }
-    
-    _fetchMessages();
-
-    _chatChannel = supabase.channel('public:messages')
-      .onPostgresChanges(
-        event: PostgresChangeEvent.insert,
-        schema: 'public',
-        table: 'messages',
-        callback: (payload) {
-          final newMsg = payload.newRecord;
-          if (mounted && newMsg['conversation_id'] == _resolvedConversationId) {
-            final exists = _messages.any((m) => m.id == newMsg['id'].toString());
-            if (!exists) {
-              setState(() {
-                _messages.add(Message(
-                  newMsg['id'].toString(),
-                  newMsg['content'],
-                  newMsg['sender_id'] == _currentUserId,
-                  isImage: newMsg['is_image'] ?? false,
-                  isRead: newMsg['is_read'] ?? false,
-                  albumId: newMsg['album_id'],
-                  caption: newMsg['caption'],
-                ));
-              });
-              _scrollToBottom();
-              
-              // Update cache
-              if (_resolvedConversationId != null) {
-                MessageCache.saveMessages(_resolvedConversationId!, _messages);
-              }
-            }
-          }
-        }
-      ).subscribe();
-  }
-
-  Future<void> _fetchMessages() async {
+  /// Opens the chat: paints cached messages at once, then reconciles with the server.
+  Future<void> _loadChat() async {
+    // 2. New chats only know the other user's id; resolve the conversation.
     if (_resolvedConversationId == null) {
-       // If it's a new chat, create the conversation in the background
-       if (widget.otherUserId != null) {
-         final newId = await ChatService.getOrCreateConversation(widget.otherUserId!);
-         _resolvedConversationId = newId;
-         // Now that we have an ID, we can start listening
-         _initSupabaseChat(); 
-       }
-       setState(() => _isLoadingMessages = false);
-       return;
-    }
-    try {
-      final data = await supabase.from('messages').select().eq('conversation_id', _resolvedConversationId ?? '').order('created_at', ascending: true);
-      setState(() {
-        _messages.clear();
-        for (var row in data) {
-          _messages.add(Message(
-            row['id'].toString(),
-            row['content'],
-            row['sender_id'] == _currentUserId,
-            isImage: row['is_image'] ?? false,
-            isRead: row['is_read'] ?? false,
-            albumId: row['album_id'],
-            caption: row['caption'],
-          ));
-        }
-      });
-      _scrollToBottom();
-      
-      // 3. SAVE TO CACHE: Update the memory cache with fresh data
-      if (_resolvedConversationId != null) {
-        MessageCache.saveMessages(_resolvedConversationId!, _messages);
+      if (widget.otherUserId == null) {
+        if (mounted) setState(() => _isLoadingMessages = false);
+        return;
       }
-      
-    } catch (e) {
-      debugPrint("Error fetching messages: $e");
-    } finally {
-      if (mounted) setState(() => _isLoadingMessages = false);
+      try {
+        _resolvedConversationId = await ChatService.getOrCreateConversation(widget.otherUserId!);
+      } catch (e) {
+        debugPrint('Could not open conversation: $e');
+        if (mounted) setState(() => _isLoadingMessages = false);
+        return;
+      }
     }
+    final convId = _resolvedConversationId!;
+
+    // 3. Subscribe first, then fetch, so no message can slip between the two.
+    _subscribeRealtime(convId);
+    await _fetchMessages();
+    ChatService.markAsRead(convId);
+  }
+
+  /// Realtime inserts for this conversation only (filtered on the server).
+  void _subscribeRealtime(String convId) {
+    _chatChannel?.unsubscribe();
+    _chatChannel = supabase.channel('chat:$convId').onPostgresChanges(
+      event: PostgresChangeEvent.insert,
+      schema: 'public',
+      table: 'messages',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'conversation_id',
+        value: convId,
+      ),
+      callback: (payload) {
+        if (mounted) _ingest(payload.newRecord);
+      },
+    ).subscribe();
+  }
+
+  /// Adds a server row exactly once. When our own message echoes back over
+  /// realtime, it replaces the pending bubble instead of appearing twice.
+  void _ingest(Map<String, dynamic> row) {
+    final id = row['id'].toString();
+    if (_messages.any((m) => m.id == id)) return;
+
+    final mine = row['sender_id'] == _currentUserId;
+    final isImage = row['is_image'] ?? false;
+    final incoming = _rowToMessage(row);
+
+    setState(() {
+      if (mine) {
+        final pending = _messages.indexWhere((m) =>
+            m.id.startsWith('temp_') && m.status == MessageStatus.sending && m.isMe && m.isImage == isImage);
+        if (pending != -1) {
+          _messages[pending] = incoming;
+          return;
+        }
+      }
+      _messages.add(incoming);
+    });
+    _scrollToBottom();
+    _persist();
+  }
+
+  /// Merges the server history with any bubbles still sending or failed.
+  Future<void> _fetchMessages() async {
+    final convId = _resolvedConversationId;
+    if (convId == null) return;
+    try {
+      final data = await supabase
+          .from('messages')
+          .select()
+          .eq('conversation_id', convId)
+          .order('created_at', ascending: true);
+      if (!mounted) return;
+
+      final server = List<Map<String, dynamic>>.from(data).map(_rowToMessage).toList();
+      final serverIds = server.map((m) => m.id).toSet();
+      final localPending = _messages.where((m) => m.id.startsWith('temp_') && !serverIds.contains(m.id)).toList();
+      final next = [...server, ...localPending];
+
+      // Only rebuild when something actually changed (the common case on reopen is no change).
+      if (!_sameMessages(_messages, next)) {
+        final wasEmpty = _messages.isEmpty;
+        setState(() {
+          _messages
+            ..clear()
+            ..addAll(next);
+        });
+        _persist();
+        if (wasEmpty) {
+          _jumpToBottom();
+        } else {
+          _scrollToBottom();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error fetching messages: $e');
+    } finally {
+      if (mounted && _isLoadingMessages) setState(() => _isLoadingMessages = false);
+    }
+  }
+
+  bool _sameMessages(List<Message> a, List<Message> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      final x = a[i];
+      final y = b[i];
+      if (x.id != y.id || x.text != y.text || x.isRead != y.isRead ||
+          x.status != y.status || x.caption != y.caption) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Scrolls to the newest message without animating (used when a chat opens).
+  void _jumpToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _scrollController.hasClients) {
+        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      }
+    });
+  }
+
+  /// Saves confirmed messages to the local cache (never pending or AI bubbles).
+  void _persist() {
+    final convId = _resolvedConversationId;
+    if (convId == null || widget.isAi) return;
+    final rows = _messages
+        .where((m) => !m.id.startsWith('temp_') && m.id != 'ai_1')
+        .map((m) => <String, dynamic>{
+              'id': m.id,
+              'content': m.text,
+              'sender_id': m.isMe ? _currentUserId : 'other',
+              'is_image': m.isImage,
+              'is_read': m.isRead,
+              'album_id': m.albumId,
+              'caption': m.caption,
+            })
+        .toList();
+    LocalCache.saveMessages(convId, rows);
   }
 
   @override
   void dispose() {
+    _menuOverlay?.remove();
+    _menuOverlay = null;
     _chatChannel?.unsubscribe();
     _textController.dispose();
     _scrollController.dispose();
@@ -734,67 +1093,66 @@ class _ChatScreenState extends State<ChatScreen> {
     final rawText = customText ?? _textController.text.trim();
     if (rawText.isEmpty) return;
 
-    String text = rawText;
-    try {
-      final core = DinorCore.load();
-      text = core.batchSanitize(rawText);
-    } catch (e) {
-      debugPrint("C++ Sanitize failed: $e");
-    }
+    // Sanitize in C++ (singleton core; Dart fallback if unavailable).
+    final text = DinorCore.load().batchSanitize(rawText);
+    if (text.isEmpty) return;
 
     if (customText == null) _textController.clear();
 
     if (widget.isAi) {
-      setState(() => _messages.add(Message(DateTime.now().toString(), text, true)));
+      setState(() => _messages.add(Message(DateTime.now().microsecondsSinceEpoch.toString(), text, true)));
       _scrollToBottom();
       _triggerAiResponse(text);
       return;
     }
 
-    if (_currentUserId == null) return;
+    final me = _currentUserId;
+    final convId = _resolvedConversationId;
+    if (me == null || convId == null) return;
 
-    int cppTime = 0;
-    try { cppTime = DinorCore.load().getFastTimestamp(); } catch (_) {}
-    final tempId = 'temp_$cppTime';
-
-    setState(() {
-      _messages.add(Message(tempId, text, true, status: MessageStatus.sending));
-    });
+    final tempId = 'temp_${DateTime.now().microsecondsSinceEpoch}';
+    setState(() => _messages.add(Message(tempId, text, true, status: MessageStatus.sending)));
     _scrollToBottom();
 
     try {
       final response = await supabase.from('messages').insert({
-        'sender_id': _currentUserId,
+        'sender_id': me,
         'content': text,
         'is_image': false,
-        'conversation_id': _resolvedConversationId,
+        'conversation_id': convId,
         'is_read': false,
       }).select('id').single();
 
-      setState(() {
-        final index = _messages.indexWhere((m) => m.id == tempId);
-        if (index != -1) {
-          _messages[index] = Message(response['id'].toString(), text, true, isRead: false, status: MessageStatus.sent);
-        }
-      });
-      
-      // Update cache instantly
-      if (_resolvedConversationId != null) {
-        MessageCache.saveMessages(_resolvedConversationId!, _messages);
+      final realId = response['id'].toString();
+      if (mounted) {
+        setState(() {
+          final i = _messages.indexWhere((m) => m.id == tempId);
+          if (i != -1) {
+            if (_messages.any((m) => m.id == realId)) {
+              _messages.removeAt(i); // realtime already added the real row
+            } else {
+              _messages[i] = Message(realId, text, true, status: MessageStatus.sent);
+            }
+          }
+        });
+        _persist();
       }
 
-      await supabase.from('conversations').update({
-        'last_message': text,
-        'last_message_time': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', _resolvedConversationId!);
-
+      try {
+        await supabase.from('conversations').update({
+          'last_message': text,
+          'last_message_time': DateTime.now().toUtc().toIso8601String(),
+        }).eq('id', convId);
+      } catch (e) {
+        debugPrint('Could not update conversation preview: $e');
+      }
     } catch (e) {
-      debugPrint("Failed to send: $e");
+      debugPrint('Failed to send: $e');
+      if (!mounted) return;
       setState(() {
-        final index = _messages.indexWhere((m) => m.id == tempId);
-        if (index != -1) {
-          _messages[index] = Message(tempId, "Failed to send", true, status: MessageStatus.failed);
-        }
+        final i = _messages.indexWhere((m) => m.id == tempId);
+        // Keep the user's text so nothing is lost; the bubble shows the failed state.
+        if (i != -1) _messages[i] = Message(tempId, text, true, status: MessageStatus.failed);
       });
     }
   }
@@ -818,7 +1176,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _scrollToBottom() {
     Future.delayed(const Duration(milliseconds: 100), () {
-      if (_scrollController.hasClients) {
+      if (mounted && _scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
           duration: const Duration(milliseconds: 300),
@@ -958,25 +1316,24 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _deleteMessage(Message msg) {
-    List<Message> toDelete = [];
-    if (msg.albumId != null) {
-      toDelete = _messages.where((m) => m.albumId == msg.albumId).toList();
-    } else {
-      toDelete = [msg];
-    }
+    final List<Message> toDelete = msg.albumId != null
+        ? _messages.where((m) => m.albumId == msg.albumId).toList()
+        : [msg];
 
     setState(() {
       _messages.removeWhere((m) => toDelete.any((d) => d.id == m.id));
     });
+    _persist();
 
+    final convId = _resolvedConversationId;
     for (var m in toDelete) {
-      if (!m.id.startsWith('temp_')) {
-        supabase.from('messages').delete().eq('id', m.id).then((_) {
-          debugPrint("Deleted message ${m.id} from Supabase");
-        }).catchError((e) {
-          debugPrint("Failed to delete message ${m.id}: $e");
-        });
-      }
+      if (m.id.startsWith('temp_')) continue;
+      supabase.from('messages').delete().eq('id', m.id).then((_) {
+        debugPrint("Deleted message ${m.id} from Supabase");
+      }).catchError((e) {
+        debugPrint("Failed to delete message ${m.id}: $e");
+      });
+      if (convId != null) LocalCache.removeMessage(convId, m.id);
     }
   }
 
@@ -1292,7 +1649,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         radius: 18,
                         backgroundColor: brandBlue.withValues(alpha: 0.2),
                         child: Text(
-                          widget.title[0],
+                          widget.title.isNotEmpty ? widget.title[0] : '?',
                           style: const TextStyle(color: brandBlue, fontWeight: FontWeight.bold, fontSize: 16),
                         ),
                       ),
@@ -1323,6 +1680,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         icon: const Icon(Icons.call, color: Colors.white, size: 22),
                         onPressed: () {
                           if (_resolvedConversationId != null && widget.otherUserId != null) {
+                            if (CallService.phase.value != CallPhase.idle) return;
                             Navigator.push(
                               context,
                               PageRouteBuilder(
@@ -3361,6 +3719,8 @@ FILE: lib/ui/profile_screen.dart
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../chat/call_service.dart';
+import '../chat/message_cache.dart';
 import 'dinor_theme.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -3381,6 +3741,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _signOut() async {
+    // Stop per-user listeners and wipe local data before signing out,
+    // so the next account on this device never sees the previous user's cache.
+    CallService.stopIncomingListener();
+    await LocalCache.clearAll();
     await supabase.auth.signOut();
     // The AuthGate in main.dart will automatically redirect to LoginScreen
   }
@@ -3694,29 +4058,26 @@ FILE: lib/ui/skeleton_loader.dart
 ============================================================
 
 import 'package:flutter/material.dart';
+
 import 'dinor_theme.dart';
 
-class MessageSkeleton extends StatefulWidget {
-  const MessageSkeleton({super.key});
+/// One shared shimmer driver. Every skeleton in the app uses this, so the
+/// loading look is consistent and each screen runs a single animation controller.
+class ShimmerArea extends StatefulWidget {
+  final Widget Function(BuildContext context, Animation<double> shimmer) builder;
+  const ShimmerArea({super.key, required this.builder});
 
   @override
-  State<MessageSkeleton> createState() => _MessageSkeletonState();
+  State<ShimmerArea> createState() => _ShimmerAreaState();
 }
 
-class _MessageSkeletonState extends State<MessageSkeleton> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
+class _ShimmerAreaState extends State<ShimmerArea> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1500),
-    )..repeat(reverse: true);
-    _animation = Tween<double>(begin: -2, end: 2).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))..repeat();
   }
 
   @override
@@ -3726,39 +4087,120 @@ class _MessageSkeletonState extends State<MessageSkeleton> with SingleTickerProv
   }
 
   @override
+  Widget build(BuildContext context) => widget.builder(context, _controller);
+}
+
+/// A single shimmering placeholder block.
+class ShimmerBlock extends StatelessWidget {
+  final Animation<double> shimmer;
+  final double? width;
+  final double height;
+  final double radius;
+  final bool circle;
+
+  const ShimmerBlock({
+    super.key,
+    required this.shimmer,
+    required this.height,
+    this.width,
+    this.radius = 12,
+    this.circle = false,
+  });
+
+  @override
   Widget build(BuildContext context) {
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: 6,
-      itemBuilder: (context, index) {
-        final isMe = index % 2 == 0;
-        return Align(
-          alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-          child: AnimatedBuilder(
-            animation: _animation,
-            builder: (context, child) {
-              return Container(
-                margin: const EdgeInsets.only(bottom: 16),
-                width: isMe ? 180 : 220,
-                height: 45,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  gradient: LinearGradient(
-                    colors: [
-                      DinorTheme.surfaceDark,
-                      DinorTheme.surfaceDark.withValues(alpha: 0.5),
-                      DinorTheme.surfaceDark,
-                    ],
-                    stops: [0.0, (index % 2 == 0 ? 0.5 : 0.4) + _animation.value * 0.2, 1.0],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                ),
-              );
-            },
+    return AnimatedBuilder(
+      animation: shimmer,
+      builder: (context, _) {
+        final t = shimmer.value * 2 - 1; // -1 .. 1
+        return Container(
+          width: width,
+          height: height,
+          decoration: BoxDecoration(
+            shape: circle ? BoxShape.circle : BoxShape.rectangle,
+            borderRadius: circle ? null : BorderRadius.circular(radius),
+            gradient: LinearGradient(
+              begin: Alignment(-1.5 + t, 0),
+              end: Alignment(1.5 + t, 0),
+              colors: [
+                DinorTheme.surfaceDark,
+                DinorTheme.surfaceDark.withValues(alpha: 0.35),
+                DinorTheme.surfaceDark,
+              ],
+              stops: const [0.2, 0.5, 0.8],
+            ),
           ),
         );
       },
+    );
+  }
+}
+
+/// Skeleton for the conversation list shown on startup when no cache exists.
+class ConversationListSkeleton extends StatelessWidget {
+  final int rows;
+  const ConversationListSkeleton({super.key, this.rows = 6});
+
+  @override
+  Widget build(BuildContext context) {
+    return ShimmerArea(
+      builder: (context, shimmer) => ListView.builder(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        itemCount: rows,
+        itemBuilder: (context, _) => Container(
+          margin: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: DinorTheme.surfaceDark.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(16)),
+          child: Row(
+            children: [
+              ShimmerBlock(shimmer: shimmer, height: 44, width: 44, circle: true),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ShimmerBlock(shimmer: shimmer, height: 14, width: 140, radius: 6),
+                    const SizedBox(height: 8),
+                    ShimmerBlock(shimmer: shimmer, height: 12, width: 220, radius: 6),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Skeleton for chat messages shown while a conversation loads with no cache.
+class MessageSkeleton extends StatelessWidget {
+  const MessageSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ShimmerArea(
+      builder: (context, shimmer) => ListView.builder(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        itemCount: 6,
+        itemBuilder: (context, index) {
+          final isMe = index.isEven;
+          return Align(
+            alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: ShimmerBlock(
+                shimmer: shimmer,
+                height: 45,
+                width: isMe ? 180 : 220,
+                radius: 16,
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -3768,21 +4210,28 @@ class _MessageSkeletonState extends State<MessageSkeleton> with SingleTickerProv
 FILE: lib/ui/call_screen.dart
 ============================================================
 
-import 'package:flutter/material.dart';
 import 'dart:async';
+
+import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../chat/call_service.dart';
 
+/// Full-screen audio call. Reflects real WebRTC state from [CallService].
+///
+/// Pass [incomingCallId] when answering a call that someone else started.
 class CallScreen extends StatefulWidget {
   final String receiverName;
   final String? receiverId;
   final String conversationId;
+  final String? incomingCallId;
 
   const CallScreen({
     super.key,
     required this.receiverName,
     required this.receiverId,
     required this.conversationId,
+    this.incomingCallId,
   });
 
   @override
@@ -3790,43 +4239,106 @@ class CallScreen extends StatefulWidget {
 }
 
 class _CallScreenState extends State<CallScreen> {
-  String _status = 'Calling';
-  bool _isEnded = false;
-  
-  // Timer logic
-  Timer? _timer;
+  Timer? _ticker;
   int _secondsElapsed = 0;
-  bool _isConnected = false;
+  bool _started = false;
+  bool _closing = false;
+  bool get _isIncoming => widget.incomingCallId != null;
 
   @override
   void initState() {
     super.initState();
-    _startCall();
+    CallService.phase.addListener(_onPhaseChanged);
+    CallService.connectedAtMs.addListener(_onConnectedChanged);
+    _start();
   }
 
-  Future<void> _startCall() async {
-    if (widget.receiverId != null) {
+  Future<void> _start() async {
+    _started = true;
+    if (_isIncoming) {
+      await CallService.acceptCall(widget.incomingCallId!);
+    } else if (widget.receiverId != null) {
       await CallService.startCall(widget.receiverId!, widget.conversationId);
     }
-    
-    // Simulate the call being picked up after 3 seconds
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted && !_isEnded) {
-        setState(() {
-          _status = 'Connected';
-          _isConnected = true;
-        });
-        _startTimer();
-      }
-    });
+    // If the service never left idle (e.g. call already in progress), close.
+    if (mounted && CallService.phase.value == CallPhase.idle && CallService.lastEndReason == 'failed') {
+      _finish();
+    }
   }
 
-  void _startTimer() {
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) {
-        setState(() => _secondsElapsed++);
-      }
-    });
+  void _onConnectedChanged() {
+    if (CallService.connectedAtMs.value != null && _ticker == null && mounted) {
+      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        final start = CallService.connectedAtMs.value;
+        if (start == null) return;
+        setState(() {
+          _secondsElapsed = (DateTime.now().millisecondsSinceEpoch - start) ~/ 1000;
+        });
+      });
+    }
+  }
+
+  void _onPhaseChanged() {
+    if (!mounted) return;
+    setState(() {});
+    // Phase returns to idle when the call is over (ended, declined, missed, failed).
+    if (_started && CallService.phase.value == CallPhase.idle) {
+      _finish();
+    }
+  }
+
+  Future<void> _finish() async {
+    if (_closing) return;
+    _closing = true;
+    _ticker?.cancel();
+    CallService.phase.removeListener(_onPhaseChanged);
+    CallService.connectedAtMs.removeListener(_onConnectedChanged);
+
+    await _logCallIfNeeded();
+
+    if (mounted) {
+      // Brief pause so the user sees "Call ended" / "No answer".
+      // Failures stay on screen long enough to read the reason.
+      final failed = CallService.lastEndReason == 'failed';
+      await Future.delayed(Duration(milliseconds: failed ? 6000 : 700));
+      if (mounted) Navigator.of(context).pop();
+    }
+  }
+
+  /// Only the caller writes the call log, so each call produces one entry.
+  Future<void> _logCallIfNeeded() async {
+    if (_isIncoming) return;
+    final reason = CallService.lastEndReason;
+    final connectedAt = CallService.connectedAtMs.value;
+    final wasConnected = _secondsElapsed > 0 || connectedAt != null;
+    final supabase = Supabase.instance.client;
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) return;
+
+    String? text;
+    if (wasConnected) {
+      text = '📞 Outgoing call (Duration: ${_formatTime(_secondsElapsed)})';
+    } else if (reason == 'missed' || reason == 'declined') {
+      text = reason == 'declined' ? '📞 Call declined' : '📞 Missed call';
+    }
+    if (text == null) return;
+
+    try {
+      await supabase.from('messages').insert({
+        'sender_id': userId,
+        'content': text,
+        'is_image': false,
+        'conversation_id': widget.conversationId,
+        'is_read': true,
+      });
+      await supabase.from('conversations').update({
+        'last_message': text,
+        'last_message_time': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', widget.conversationId);
+    } catch (e) {
+      debugPrint('Failed to log call: $e');
+    }
   }
 
   String _formatTime(int seconds) {
@@ -3835,60 +4347,51 @@ class _CallScreenState extends State<CallScreen> {
     return '$minutes:$secs';
   }
 
-  Future<void> _endCall() async {
-    _timer?.cancel();
-    setState(() => _isEnded = true);
-    await CallService.endCall();
-    
-    // Log the call in the chat
-    if (_isConnected) {
-      // Insert a call message into Supabase
-      try {
-        final supabase = Supabase.instance.client;
-        final userId = supabase.auth.currentUser!.id;
-        
-        String callDuration = _formatTime(_secondsElapsed);
-        // Check if I am the caller or receiver to format the message correctly
-        // Since this is a simple implementation, we assume the current user is the caller for this screen
-        String callText = "📞 Outgoing call (Duration: $callDuration)";
-        
-        await supabase.from('messages').insert({
-          'sender_id': userId,
-          'content': callText,
-          'is_image': false,
-          'conversation_id': widget.conversationId,
-          'is_read': true, // Call logs are read by default
-        });
-
-        await supabase.from('conversations').update({
-          'last_message': callText,
-          'last_message_time': DateTime.now().toUtc().toIso8601String(),
-        }).eq('id', widget.conversationId);
-
-      } catch (e) {
-        debugPrint("Failed to log call: $e");
+  String _statusText(CallPhase phase, bool closing) {
+    if (closing) {
+      switch (CallService.lastEndReason) {
+        case 'declined': return 'Call declined';
+        case 'missed': return 'No answer';
+        case 'failed': return 'Call failed';
+        default: return 'Call ended';
       }
     }
+    switch (phase) {
+      case CallPhase.calling: return 'Calling…';
+      case CallPhase.connecting: return 'Connecting…';
+      case CallPhase.connected: return _formatTime(_secondsElapsed);
+      case CallPhase.idle: return _isIncoming ? 'Connecting…' : 'Calling…';
+    }
+  }
 
-    if (mounted) Navigator.pop(context);
+  Future<void> _endPressed() async {
+    await CallService.endCall(reason: 'ended');
+    // endCall returns to idle, which triggers _finish via the listener.
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _ticker?.cancel();
+    CallService.phase.removeListener(_onPhaseChanged);
+    CallService.connectedAtMs.removeListener(_onConnectedChanged);
+    // Leaving this screen must never leave the microphone open.
+    if (CallService.phase.value != CallPhase.idle) {
+      CallService.endCall(reason: 'ended');
+    }
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final phase = CallService.phase.value;
+    final connected = phase == CallPhase.connected;
+    final name = widget.receiverName;
+
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [
-              Color(0xFFFF80AB), // Pink
-              Color(0xFFC51162), // Deep Pink/Magenta
-            ],
+            colors: [Color(0xFFFF80AB), Color(0xFFC51162)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -3897,76 +4400,48 @@ class _CallScreenState extends State<CallScreen> {
           child: Column(
             children: [
               const SizedBox(height: 40),
-              
-              // Status Text
               Text(
-                _isConnected ? _formatTime(_secondsElapsed) : '$_status...',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 28,
-                  fontWeight: FontWeight.w300,
-                  letterSpacing: 2,
-                ),
+                _statusText(phase, _closing),
+                style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w300, letterSpacing: 2),
               ),
-              
               const SizedBox(height: 60),
-              
-              // Big Profile Circle
-              Center(
-                child: Container(
-                  width: 160,
-                  height: 160,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 4),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.2),
-                        blurRadius: 30,
-                        spreadRadius: 10,
-                      ),
-                    ],
-                  ),
-                  child: Center(
-                    child: Text(
-                      widget.receiverName.isNotEmpty ? widget.receiverName[0].toUpperCase() : '?',
-                      style: const TextStyle(color: Colors.white, fontSize: 64, fontWeight: FontWeight.bold),
-                    ),
+              Container(
+                width: 160,
+                height: 160,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 4),
+                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 30, spreadRadius: 10)],
+                ),
+                child: Center(
+                  child: Text(
+                    name.isNotEmpty ? name[0].toUpperCase() : '?',
+                    style: const TextStyle(color: Colors.white, fontSize: 64, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
-              
               const SizedBox(height: 40),
-              
-              // Receiver Name
-              Text(
-                widget.receiverName,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
+              Text(name, style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+              if (_closing && CallService.lastErrorMessage != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  child: Text(
+                    CallService.lastErrorMessage!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                  ),
                 ),
-              ),
-              
               const Spacer(),
-              
-              // Calling Dots Animation (Only show if not connected)
-              if (!_isEnded && !_isConnected) const AnimatedCallingDots(),
-              
+              if (!connected && !_closing) const AnimatedCallingDots(),
               const Spacer(),
-              
-              // End Call Button
               Padding(
                 padding: const EdgeInsets.only(bottom: 50),
                 child: GestureDetector(
-                  onTap: _endCall,
+                  onTap: _closing ? null : _endPressed,
                   child: Container(
                     width: 70,
                     height: 70,
-                    decoration: const BoxDecoration(
-                      color: Colors.redAccent,
-                      shape: BoxShape.circle,
-                    ),
+                    decoration: const BoxDecoration(color: Colors.redAccent, shape: BoxShape.circle),
                     child: const Icon(Icons.call_end, color: Colors.white, size: 32),
                   ),
                 ),
@@ -3987,15 +4462,12 @@ class AnimatedCallingDots extends StatefulWidget {
 }
 
 class _AnimatedCallingDotsState extends State<AnimatedCallingDots> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
+  late final AnimationController _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
   }
 
   @override
@@ -4013,24 +4485,14 @@ class _AnimatedCallingDotsState extends State<AnimatedCallingDots> with SingleTi
         return Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: List.generate(3, (index) {
-            double scale = 1.0;
-            double delay = index * 0.2;
-            double progress = (t - delay) % 1.0;
+            double progress = (t - index * 0.2) % 1.0;
             if (progress < 0) progress += 1.0;
-            scale = 1.0 + (0.8 * (progress < 0.5 ? progress * 2 : (1 - progress) * 2));
-            
+            final scale = 1.0 + (0.8 * (progress < 0.5 ? progress * 2 : (1 - progress) * 2));
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
               child: Transform.scale(
                 scale: scale,
-                child: Container(
-                  width: 12,
-                  height: 12,
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                  ),
-                ),
+                child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
               ),
             );
           }),
@@ -4094,29 +4556,38 @@ FILE: lib/chat/chat_service.dart
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../ffi/dinor_bindings.dart';
+
 class ChatService {
-  static final supabase = Supabase.instance.client;
+  static SupabaseClient get supabase => Supabase.instance.client;
+
+  static String? get myId => supabase.auth.currentUser?.id;
 
   static Future<List<Map<String, dynamic>>> searchUsers(String query) async {
+    final me = myId;
+    if (me == null) return [];
+    // Escape % and _ so user input cannot act as wildcards.
+    final safe = DinorCore.load().escapeLike(query.trim());
+    if (safe.isEmpty) return [];
     final response = await supabase
         .from('profiles')
         .select()
-        .ilike('username', '%$query%')
-        .neq('id', supabase.auth.currentUser!.id)
+        .ilike('username', '%$safe%')
+        .neq('id', me)
         .limit(10);
     return List<Map<String, dynamic>>.from(response);
   }
 
   static Future<String> getOrCreateConversation(String otherUserId) async {
     final myId = supabase.auth.currentUser!.id;
-    
+
     final existing = await supabase
         .from('conversations')
         .select('id')
         .or('and(user1_id.eq.$myId,user2_id.eq.$otherUserId),and(user1_id.eq.$otherUserId,user2_id.eq.$myId)')
         .maybeSingle();
 
-    if (existing != null) return existing['id'];
+    if (existing != null) return existing['id'] as String;
 
     final newConv = await supabase
         .from('conversations')
@@ -4124,44 +4595,51 @@ class ChatService {
         .select('id')
         .single();
 
-    return newConv['id'];
+    return newConv['id'] as String;
   }
 
+  /// Conversations with the other user's profile and unread info.
+  /// Unread lookups run in parallel (one round trip of latency, not N).
   static Future<List<Map<String, dynamic>>> getMyConversations() async {
     final myId = supabase.auth.currentUser!.id;
-    
-    // 1. Get conversations with joined users
+
     final response = await supabase
         .from('conversations')
         .select('*, user1:profiles!conversations_user1_id_fkey(*), user2:profiles!conversations_user2_id_fkey(*)')
         .or('user1_id.eq.$myId,user2_id.eq.$myId')
         .order('last_message_time', ascending: false);
-        
-    final List<Map<String, dynamic>> conversations = List<Map<String, dynamic>>.from(response);
 
-    // 2. For each conversation, fetch the unread count and the latest unread message (if any)
-    for (var conv in conversations) {
-      final unreadMessages = await supabase
+    final conversations = List<Map<String, dynamic>>.from(response);
+
+    final unreadLists = await Future.wait(conversations.map((conv) {
+      return supabase
           .from('messages')
           .select('content, is_image')
           .eq('conversation_id', conv['id'])
           .neq('sender_id', myId)
           .eq('is_read', false)
-          .order('created_at', ascending: false);
+          .order('created_at', ascending: false)
+          .then((rows) => List<Map<String, dynamic>>.from(rows))
+          .catchError((_) => <Map<String, dynamic>>[]);
+    }));
 
-      conv['unread_count'] = unreadMessages.length;
-      conv['latest_unread'] = unreadMessages.isNotEmpty ? unreadMessages.first : null;
+    for (var i = 0; i < conversations.length; i++) {
+      final unread = unreadLists[i];
+      conversations[i]['unread_count'] = unread.length;
+      conversations[i]['latest_unread'] = unread.isNotEmpty ? unread.first : null;
     }
 
     return conversations;
   }
 
   static Future<void> markAsRead(String conversationId) async {
+    final me = myId;
+    if (me == null) return;
     await supabase
         .from('messages')
         .update({'is_read': true})
         .eq('conversation_id', conversationId)
-        .neq('sender_id', supabase.auth.currentUser!.id)
+        .neq('sender_id', me)
         .eq('is_read', false);
   }
 }
@@ -4172,157 +4650,478 @@ FILE: lib/chat/call_service.dart
 ============================================================
 
 import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// Lifecycle of the one active call on this device.
+enum CallPhase { idle, calling, connecting, connected }
+
+class IncomingCall {
+  final String callId;
+  final String callerId;
+  final String conversationId;
+  final String callerName;
+  const IncomingCall({
+    required this.callId,
+    required this.callerId,
+    required this.conversationId,
+    required this.callerName,
+  });
+}
+
+/// WebRTC audio calls signaled through the `calls` table.
+///
+/// * Incoming calls ring (native ringtone + vibration) and show a prompt.
+/// * The prompt closes if the caller hangs up before it is answered.
+/// * The answerer waits for the caller's offer instead of failing on a race.
+/// * Hang-up releases the microphone at once (peer closed, tracks stopped).
 class CallService {
-  static final supabase = Supabase.instance.client;
-  
-  static RTCPeerConnection? _peerConnection;
+  CallService._();
+
+  static SupabaseClient get _db => Supabase.instance.client;
+
+  static const Duration _ringTimeout = Duration(seconds: 45);
+  static const MethodChannel _ringChannel = MethodChannel('dinor/ring');
+  static const Map<String, dynamic> _rtcConfig = {
+    'iceServers': [
+      {'urls': 'stun:stun.l.google.com:19302'},
+    ],
+  };
+
+  // Observed by the UI.
+  static final ValueNotifier<CallPhase> phase = ValueNotifier(CallPhase.idle);
+  static final ValueNotifier<int?> connectedAtMs = ValueNotifier(null);
+  static final ValueNotifier<IncomingCall?> incoming = ValueNotifier(null);
+
+  /// Why the last call ended: 'ended', 'missed', 'declined', 'failed', or null.
+  static String? lastEndReason;
+
+  /// Human-readable reason for the last failure (shown on the call screen).
+  static String? lastErrorMessage;
+
+  static RTCPeerConnection? _pc;
   static MediaStream? _localStream;
-  static RealtimeChannel? _signalChannel;
-  static String? _currentCallId;
+  static RealtimeChannel? _callChannel;
+  static RealtimeChannel? _incomingChannel;
+  static String? _callId;
+  static bool _isCaller = false;
 
-  // 1. Start a call
-  static Future<void> startCall(String receiverId, String conversationId) async {
-    final myId = supabase.auth.currentUser!.id;
-    
-    // Create the call in the database
-    final callData = await supabase.from('calls').insert({
-      'caller_id': myId,
-      'receiver_id': receiverId,
-      'conversation_id': conversationId,
-      'status': 'ringing',
-    }).select('id').single();
-    
-    _currentCallId = callData['id'];
-    await _initWebRTC(true);
-    await _createOffer();
-    _listenToSignals(isCaller: true);
-  }
+  static bool _remoteDescSet = false;
+  static bool _answerApplied = false;
+  static int _remoteIceApplied = 0;
+  static final List<RTCIceCandidate> _pendingRemoteIce = [];
 
-  // 2. Accept a call
-  static Future<void> acceptCall(String callId) async {
-    _currentCallId = callId;
-    await _initWebRTC(false);
-    
-    // Get the offer from the database
-    final callData = await supabase.from('calls').select('offer').eq('id', callId).single();
-    final offer = callData['offer'];
-    
-    if (offer != null) {
-      await _peerConnection!.setRemoteDescription(RTCSessionDescription(offer['sdp'], offer['type']));
-      await _createAnswer();
-      _listenToSignals(isCaller: false);
+  static Future<void> _iceWriteChain = Future.value();
+  static Timer? _ringTimer;
+
+  static String? get currentCallId => _callId;
+
+  // ---------------------------------------------------------------------------
+  // Ringing (native ringtone + vibration; silently skipped where unavailable)
+  // ---------------------------------------------------------------------------
+
+  static Future<void> _ring(bool on) async {
+    try {
+      await _ringChannel.invokeMethod(on ? 'start' : 'stop');
+    } catch (_) {
+      // Not available on this platform: the on-screen prompt still shows.
     }
   }
 
-  // 3. Initialize WebRTC
-  static Future<void> _initWebRTC(bool isCaller) async {
-    _localStream = await navigator.mediaDevices.getUserMedia({
-      'audio': true,
-      'video': false,
-    });
+  // ---------------------------------------------------------------------------
+  // Incoming calls
+  // ---------------------------------------------------------------------------
 
-    final config = {
-      'iceServers': [
-        {'urls': 'stun:stun.l.google.com:19302'},
-      ]
-    };
+  /// Listens for calls addressed to this user. Call after login.
+  static void startIncomingListener() {
+    final me = _db.auth.currentUser?.id;
+    if (me == null) return;
+    _incomingChannel?.unsubscribe();
+    final filter = PostgresChangeFilter(
+      type: PostgresChangeFilterType.eq,
+      column: 'receiver_id',
+      value: me,
+    );
+    _incomingChannel = _db
+        .channel('incoming_calls:$me')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'calls',
+          filter: filter,
+          callback: (payload) => _onIncomingRow(payload.newRecord),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'calls',
+          filter: filter,
+          callback: (payload) => _onIncomingUpdate(payload.newRecord),
+        )
+        .subscribe();
+  }
 
-    _peerConnection = await createPeerConnection(config);
-    _peerConnection!.addStream(_localStream!);
+  static void stopIncomingListener() {
+    _incomingChannel?.unsubscribe();
+    _incomingChannel = null;
+    _clearIncoming();
+  }
 
-    _peerConnection!.onIceCandidate = (candidate) {
-      _sendSignal('ice', {
+  static void _clearIncoming() {
+    incoming.value = null;
+    _ring(false);
+  }
+
+  static Future<void> _onIncomingRow(Map<String, dynamic> row) async {
+    if (row['status'] != 'ringing') return;
+    if (phase.value != CallPhase.idle) {
+      // Already on a call: decline so the caller does not ring forever.
+      await _declineRow(row['id'].toString());
+      return;
+    }
+    _ring(true);
+
+    String name = 'Unknown';
+    try {
+      final profile = await _db
+          .from('profiles')
+          .select('username')
+          .eq('id', row['caller_id'])
+          .maybeSingle();
+      name = (profile?['username'] as String?) ?? name;
+    } catch (_) {}
+
+    // The caller may have hung up while we looked up the name.
+    if (phase.value != CallPhase.idle) return;
+    incoming.value = IncomingCall(
+      callId: row['id'].toString(),
+      callerId: row['caller_id'].toString(),
+      conversationId: row['conversation_id'].toString(),
+      callerName: name,
+    );
+  }
+
+  /// Closes the prompt when the caller cancels or the call is answered elsewhere.
+  static void _onIncomingUpdate(Map<String, dynamic> row) {
+    final current = incoming.value;
+    if (current == null || current.callId != row['id'].toString()) return;
+    if (row['status'] != 'ringing') _clearIncoming();
+  }
+
+  static Future<void> declineCall(String callId) async {
+    _clearIncoming();
+    await _declineRow(callId);
+  }
+
+  static Future<void> _declineRow(String callId) async {
+    try {
+      await _db.from('calls').update({'status': 'declined'}).eq('id', callId);
+    } catch (_) {}
+  }
+
+  // ---------------------------------------------------------------------------
+  // Caller
+  // ---------------------------------------------------------------------------
+
+  static Future<void> startCall(String receiverId, String conversationId) async {
+    if (phase.value != CallPhase.idle) return;
+    final me = _db.auth.currentUser!.id;
+    _isCaller = true;
+    lastErrorMessage = null;
+    lastEndReason = null;
+    phase.value = CallPhase.calling;
+
+    try {
+      final row = await _db.from('calls').insert({
+        'caller_id': me,
+        'receiver_id': receiverId,
+        'conversation_id': conversationId,
+        'status': 'ringing',
+      }).select('id').single();
+      _callId = row['id'].toString();
+
+      await _openMedia();
+      await _createPeer();
+
+      final offer = await _pc!.createOffer({'offerToReceiveAudio': 1});
+      await _pc!.setLocalDescription(offer);
+      await _db.from('calls').update({
+        'offer': {'sdp': offer.sdp, 'type': offer.type},
+      }).eq('id', _callId!);
+
+      _subscribe();
+      // Catch an answer that was written before the subscription went live.
+      final current = await _db.from('calls').select().eq('id', _callId!).single();
+      await _applyRow(current);
+
+      _ringTimer = Timer(_ringTimeout, () {
+        if (phase.value == CallPhase.calling) endCall(reason: 'missed');
+      });
+    } catch (e) {
+      debugPrint('startCall failed: $e');
+      lastErrorMessage = _friendly(e);
+      await _fail();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Receiver
+  // ---------------------------------------------------------------------------
+
+  static Future<void> acceptCall(String callId) async {
+    if (phase.value != CallPhase.idle) return;
+    _clearIncoming(); // stops the ringtone
+    _isCaller = false;
+    _callId = callId;
+    lastErrorMessage = null;
+    lastEndReason = null;
+    phase.value = CallPhase.connecting;
+
+    try {
+      var row = await _db.from('calls').select().eq('id', callId).single();
+
+      // The caller writes the offer just after creating the row, so wait briefly.
+      for (var i = 0; row['offer'] == null && i < 30; i++) {
+        if (row['status'] == 'ended' || row['status'] == 'declined') {
+          throw StateError('The caller hung up.');
+        }
+        await Future.delayed(const Duration(milliseconds: 500));
+        row = await _db.from('calls').select().eq('id', callId).single();
+      }
+      final offer = row['offer'];
+      if (offer == null) throw StateError('The call did not start. Ask them to call again.');
+
+      await _openMedia();
+      await _createPeer();
+
+      await _pc!.setRemoteDescription(
+        RTCSessionDescription(offer['sdp'] as String, offer['type'] as String),
+      );
+      _remoteDescSet = true;
+      await _flushPendingIce();
+
+      final answer = await _pc!.createAnswer({'offerToReceiveAudio': 1});
+      await _pc!.setLocalDescription(answer);
+      await _db.from('calls').update({
+        'answer': {'sdp': answer.sdp, 'type': answer.type},
+        'status': 'active',
+      }).eq('id', callId);
+
+      _subscribe();
+      await _applyRow(row);
+    } catch (e) {
+      debugPrint('acceptCall failed: $e');
+      lastErrorMessage = _friendly(e);
+      await _fail();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared plumbing
+  // ---------------------------------------------------------------------------
+
+  static Future<void> _openMedia() async {
+    final mic = await Permission.microphone.request();
+    if (!mic.isGranted) {
+      throw StateError('Microphone permission is off. Allow it for Dinor in Android Settings.');
+    }
+    _localStream = await navigator.mediaDevices.getUserMedia({'audio': true, 'video': false});
+  }
+
+  static Future<void> _createPeer() async {
+    final pc = await createPeerConnection(_rtcConfig);
+    _pc = pc;
+
+    for (final track in _localStream?.getAudioTracks() ?? const <MediaStreamTrack>[]) {
+      await pc.addTrack(track, _localStream!);
+    }
+
+    pc.onIceCandidate = (candidate) {
+      if (candidate.candidate == null) return;
+      _queueIce({
         'candidate': candidate.candidate,
         'sdpMid': candidate.sdpMid,
         'sdpMLineIndex': candidate.sdpMLineIndex,
-      }, isCaller);
+      });
     };
 
-    _peerConnection!.onAddStream = (stream) {
-      // Here you would play the audio using an RTCVideoRenderer or audio player
-      // For audio only, WebRTC handles playing through the system speaker.
+    pc.onConnectionState = (state) {
+      switch (state) {
+        case RTCPeerConnectionState.RTCPeerConnectionStateConnected:
+          _ringTimer?.cancel();
+          phase.value = CallPhase.connected;
+          connectedAtMs.value ??= DateTime.now().millisecondsSinceEpoch;
+          break;
+        case RTCPeerConnectionState.RTCPeerConnectionStateFailed:
+          lastErrorMessage = 'Could not connect to the other phone. Your network may block direct calls.';
+          _fail();
+          break;
+        default:
+          break;
+      }
     };
   }
 
-  // 4. Create Offer
-  static Future<void> _createOffer() async {
-    final offer = await _peerConnection!.createOffer();
-    await _peerConnection!.setLocalDescription(offer);
-    
-    await supabase.from('calls').update({
-      'offer': {'sdp': offer.sdp, 'type': offer.type}
-    }).eq('id', _currentCallId!);
+  /// Serializes ICE writes so concurrent candidates are never lost.
+  static void _queueIce(Map<String, dynamic> candidate) {
+    _iceWriteChain = _iceWriteChain.then((_) async {
+      final id = _callId;
+      if (id == null) return;
+      final column = _isCaller ? 'caller_ice' : 'receiver_ice';
+      try {
+        final current = await _db.from('calls').select(column).eq('id', id).single();
+        final list = List<dynamic>.from((current[column] as List?) ?? const []);
+        list.add(candidate);
+        await _db.from('calls').update({column: list}).eq('id', id);
+      } catch (e) {
+        debugPrint('ICE write failed: $e');
+      }
+    });
   }
 
-  // 5. Create Answer
-  static Future<void> _createAnswer() async {
-    final answer = await _peerConnection!.createAnswer();
-    await _peerConnection!.setLocalDescription(answer);
-    
-    await supabase.from('calls').update({
-      'answer': {'sdp': answer.sdp, 'type': answer.type}
-    }).eq('id', _currentCallId!);
+  static void _subscribe() {
+    final id = _callId;
+    if (id == null) return;
+    _callChannel?.unsubscribe();
+    _callChannel = _db
+        .channel('call:$id')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'calls',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'id',
+            value: id,
+          ),
+          callback: (payload) => _applyRow(payload.newRecord),
+        )
+        .subscribe();
   }
 
-  // 6. Listen to Supabase signals (ICE and SDP)
-  static void _listenToSignals({required bool isCaller}) {
-    _signalChannel = supabase.channel('call:$_currentCallId')
-      .onPostgresChanges(
-        event: PostgresChangeEvent.update,
-        schema: 'public',
-        table: 'calls',
-        filter: PostgresChangeFilter(
-          type: PostgresChangeFilterType.eq,
-          column: 'id',
-          value: _currentCallId!,
-        ),
-        callback: (payload) async {
-          final newRecord = payload.newRecord;
-          
-          // If we are the caller and the receiver answered
-          if (isCaller && newRecord['answer'] != null) {
-            final answer = newRecord['answer'];
-            await _peerConnection!.setRemoteDescription(RTCSessionDescription(answer['sdp'], answer['type']));
-          }
-          
-          // ICE candidates
-          final remoteIce = isCaller ? newRecord['receiver_ice'] : newRecord['caller_ice'];
-          if (remoteIce != null && remoteIce is List) {
-             for (var ice in remoteIce) {
-               await _peerConnection!.addCandidate(RTCIceCandidate(ice['candidate'], ice['sdpMid'], ice['sdpMLineIndex']));
-             }
-          }
+  /// Applies remote signaling from a call row. Safe to call repeatedly.
+  static Future<void> _applyRow(Map<String, dynamic> row) async {
+    final pc = _pc;
+    if (pc == null) return;
+
+    final status = row['status'];
+    if (status == 'ended' || status == 'declined') {
+      await endCall(reason: status as String, notifyRemote: false);
+      return;
+    }
+
+    // Caller: apply the answer once.
+    if (_isCaller && !_answerApplied && row['answer'] != null) {
+      final answer = row['answer'] as Map;
+      _answerApplied = true;
+      await pc.setRemoteDescription(
+        RTCSessionDescription(answer['sdp'] as String, answer['type'] as String),
+      );
+      _remoteDescSet = true;
+      await _flushPendingIce();
+    }
+
+    // Remote ICE: only process entries we have not applied yet.
+    final remoteColumn = _isCaller ? 'receiver_ice' : 'caller_ice';
+    final remote = row[remoteColumn];
+    if (remote is List && remote.length > _remoteIceApplied) {
+      for (final raw in remote.sublist(_remoteIceApplied)) {
+        final ice = raw as Map;
+        final candidate = RTCIceCandidate(
+          ice['candidate'] as String?,
+          ice['sdpMid'] as String?,
+          ice['sdpMLineIndex'] as int?,
+        );
+        if (_remoteDescSet) {
+          await pc.addCandidate(candidate);
+        } else {
+          _pendingRemoteIce.add(candidate);
         }
-      ).subscribe();
-  }
-
-  // 7. Send ICE Signal to DB
-  static Future<void> _sendSignal(String type, Map<String, dynamic> data, bool isCaller) async {
-    if (type == 'ice') {
-      // Get current ICE list and append
-      final callData = await supabase.from('calls').select(isCaller ? 'caller_ice' : 'receiver_ice').eq('id', _currentCallId!).single();
-      final List currentIce = (callData[isCaller ? 'caller_ice' : 'receiver_ice'] as List?) ?? [];
-      currentIce.add(data);
-      
-      await supabase.from('calls').update({
-        isCaller ? 'caller_ice' : 'receiver_ice': currentIce
-      }).eq('id', _currentCallId!);
+      }
+      _remoteIceApplied = remote.length;
     }
   }
 
-  // 8. End Call
-  static Future<void> endCall() async {
-    await _localStream?.dispose();
-    await _peerConnection?.close();
-    _signalChannel?.unsubscribe();
-    
-    if (_currentCallId != null) {
-      await supabase.from('calls').update({'status': 'ended'}).eq('id', _currentCallId!);
-      _currentCallId = null;
+  static Future<void> _flushPendingIce() async {
+    final pc = _pc;
+    if (pc == null) return;
+    for (final c in List<RTCIceCandidate>.from(_pendingRemoteIce)) {
+      await pc.addCandidate(c);
     }
+    _pendingRemoteIce.clear();
+  }
+
+  static Future<void> _fail() => endCall(reason: 'failed');
+
+  static String _friendly(Object e) {
+    final text = e.toString().replaceFirst(RegExp(r'^[A-Za-z]*(Error|Exception): '), '');
+    return text.length > 160 ? '${text.substring(0, 160)}…' : text;
+  }
+
+  /// Ends the call. The UI returns to idle at once; media and network cleanup follow.
+  static Future<void> endCall({String reason = 'ended', bool notifyRemote = true}) async {
+    if (phase.value == CallPhase.idle && _callId == null && _pc == null && _localStream == null) return;
+    lastEndReason = reason;
+    _ringTimer?.cancel();
+    _ringTimer = null;
+
+    // Take ownership of everything first, so a second call cannot touch it.
+    final id = _callId;
+    final wasActive = phase.value != CallPhase.idle;
+    final pc = _pc;
+    final stream = _localStream;
+    final channel = _callChannel;
+
+    _pc = null;
+    _localStream = null;
+    _callChannel = null;
+    _callId = null;
+    _remoteDescSet = false;
+    _answerApplied = false;
+    _remoteIceApplied = 0;
+    _pendingRemoteIce.clear();
+    _iceWriteChain = Future.value();
+    connectedAtMs.value = null;
+
+    // Back to idle now, so the screen closes without waiting on the network.
+    phase.value = CallPhase.idle;
+
+    await _releaseMedia(pc, stream, channel);
+
+    if (notifyRemote && id != null && wasActive) {
+      unawaited(_db
+          .from('calls')
+          .update({'status': 'ended'})
+          .eq('id', id)
+          .timeout(const Duration(seconds: 5))
+          .catchError((_) {}));
+    }
+  }
+
+  /// Closes the connection and stops the microphone (clears the green mic dot).
+  static Future<void> _releaseMedia(
+    RTCPeerConnection? pc,
+    MediaStream? stream,
+    RealtimeChannel? channel,
+  ) async {
+    try {
+      await channel?.unsubscribe();
+    } catch (_) {}
+    try {
+      await pc?.close();
+    } catch (_) {}
+    for (final track in stream?.getAudioTracks() ?? const <MediaStreamTrack>[]) {
+      try {
+        await track.stop();
+      } catch (_) {}
+    }
+    try {
+      await stream?.dispose();
+    } catch (_) {}
   }
 }
 
@@ -4331,22 +5130,188 @@ class CallService {
 FILE: lib/chat/message_cache.dart
 ============================================================
 
-import '../ui/chat_screen.dart';
+import 'dart:convert';
 
-class MessageCache {
-  // Stores messages by conversationId
-  static final Map<String, List<Message>> _cache = {};
+import 'package:shared_preferences/shared_preferences.dart';
 
-  static List<Message>? getMessages(String conversationId) {
-    return _cache[conversationId];
+import '../ffi/dinor_bindings.dart';
+
+/// Local cache for conversations and chat messages.
+///
+/// Strategy ("show first, refresh after"):
+///  * Startup paints the cached conversation list immediately (no spinner).
+///  * Opening a chat paints its cached messages immediately.
+///  * Every entry carries `savedAt`; stale entries still paint, then the
+///    screen refreshes from the network in the background.
+///  * Data is mirrored in memory (instant) and in SharedPreferences (survives restarts).
+///  * Message lists are capped so the cache never grows without bound.
+class LocalCache {
+  LocalCache._();
+
+  static const String _conversationsKey = 'cache.v2.conversations';
+  static const String _messagesPrefix = 'cache.v2.messages.';
+  static const String _indexKey = 'cache.v2.message_index';
+
+  /// Entries older than this are refreshed in the background.
+  static const Duration ttl = Duration(minutes: 5);
+
+  /// Max messages kept per conversation on disk and in memory.
+  static const int maxMessagesPerConversation = 100;
+
+  /// Max conversations whose messages we keep (least recently used are dropped).
+  static const int maxCachedConversations = 30;
+
+  static SharedPreferences? _prefs;
+  static bool _loaded = false;
+
+  static final Map<String, _Entry> _memory = {};
+
+  static Future<SharedPreferences> _p() async => _prefs ??= await SharedPreferences.getInstance();
+
+  /// Loads the conversation list into memory. Call once at startup, before runApp
+  /// finishes its first frame where possible.
+  static Future<void> preload() async {
+    if (_loaded) return;
+    _loaded = true;
+    final prefs = await _p();
+    final raw = prefs.getString(_conversationsKey);
+    if (raw != null) {
+      final entry = _Entry.decode(raw);
+      if (entry != null) _memory[_conversationsKey] = entry;
+    }
+    // Load recent chats into memory now, so opening one paints on the first frame.
+    for (final id in prefs.getStringList(_indexKey) ?? const <String>[]) {
+      final rawMessages = prefs.getString(_messagesPrefix + id);
+      if (rawMessages == null) continue;
+      final entry = _Entry.decode(rawMessages);
+      if (entry != null) _memory[_messagesPrefix + id] = entry;
+    }
   }
 
-  static void saveMessages(String conversationId, List<Message> messages) {
-    _cache[conversationId] = List.from(messages);
+  /// Synchronous: cached messages for a chat, or null. Call after [preload].
+  static List<Map<String, dynamic>>? peekMessages(String conversationId) {
+    final e = _memory[_messagesPrefix + conversationId];
+    if (e == null) return null;
+    return (e.data as List).map((x) => Map<String, dynamic>.from(x as Map)).toList();
   }
 
-  static void clearCache() {
-    _cache.clear();
+  // ---- conversations -------------------------------------------------------
+  /// Synchronous: returns the last saved conversation list, or null.
+  static List<Map<String, dynamic>>? peekConversations() {
+    final e = _memory[_conversationsKey];
+    if (e == null) return null;
+    return (e.data as List).map((x) => Map<String, dynamic>.from(x as Map)).toList();
+  }
+
+  static bool conversationsAreFresh() => _isFresh(_memory[_conversationsKey]);
+
+  static Future<void> saveConversations(List<Map<String, dynamic>> conversations) async {
+    // Only keep the lightweight fields the list actually renders.
+    final light = conversations.map((c) => _lightConversation(c)).toList();
+    _memory[_conversationsKey] = _Entry(DateTime.now().millisecondsSinceEpoch, light);
+    final prefs = await _p();
+    await prefs.setString(_conversationsKey, _memory[_conversationsKey]!.encode());
+  }
+
+  // ---- messages ------------------------------------------------------------
+  /// Loads cached rows for a conversation (memory first, then disk).
+  static Future<List<Map<String, dynamic>>?> loadMessages(String conversationId) async {
+    final key = _messagesPrefix + conversationId;
+    var entry = _memory[key];
+    if (entry == null) {
+      final prefs = await _p();
+      final raw = prefs.getString(key);
+      if (raw != null) {
+        entry = _Entry.decode(raw);
+        if (entry != null) _memory[key] = entry;
+      }
+    }
+    if (entry == null) return null;
+    return (entry.data as List).map((x) => Map<String, dynamic>.from(x as Map)).toList();
+  }
+
+  static bool messagesAreFresh(String conversationId) =>
+      _isFresh(_memory[_messagesPrefix + conversationId]);
+
+  static Future<void> saveMessages(String conversationId, List<Map<String, dynamic>> rows) async {
+    final key = _messagesPrefix + conversationId;
+    final trimmed = rows.length > maxMessagesPerConversation
+        ? rows.sublist(rows.length - maxMessagesPerConversation)
+        : rows;
+    final entry = _Entry(DateTime.now().millisecondsSinceEpoch, trimmed);
+    _memory[key] = entry;
+
+    final prefs = await _p();
+    await prefs.setString(key, entry.encode());
+
+    // Track recency so we can evict old conversations.
+    final index = List<String>.from(prefs.getStringList(_indexKey) ?? const []);
+    index.remove(conversationId);
+    index.add(conversationId);
+    while (index.length > maxCachedConversations) {
+      final evicted = index.removeAt(0);
+      _memory.remove(_messagesPrefix + evicted);
+      await prefs.remove(_messagesPrefix + evicted);
+    }
+    await prefs.setStringList(_indexKey, index);
+  }
+
+  /// Removes one message from the cached list (keeps cache in sync after a delete).
+  static Future<void> removeMessage(String conversationId, String messageId) async {
+    final rows = await loadMessages(conversationId);
+    if (rows == null) return;
+    rows.removeWhere((r) => r['id']?.toString() == messageId);
+    await saveMessages(conversationId, rows);
+  }
+
+  /// Clears everything (call on sign-out so the next user never sees old data).
+  static Future<void> clearAll() async {
+    _memory.clear();
+    final prefs = await _p();
+    final keys = prefs.getKeys().where((k) => k.startsWith('cache.v2.')).toList();
+    for (final k in keys) {
+      await prefs.remove(k);
+    }
+  }
+
+  // ---- helpers -------------------------------------------------------------
+  static bool _isFresh(_Entry? e) {
+    if (e == null) return false;
+    return !DinorCore.load().isStale(savedAtMs: e.savedAt, ttlMs: ttl.inMilliseconds);
+  }
+
+  static Map<String, dynamic> _lightConversation(Map<String, dynamic> c) {
+    Map<String, dynamic>? slim(dynamic p) => p == null
+        ? null
+        : {'id': (p as Map)['id'], 'username': p['username'], 'avatar_url': p['avatar_url']};
+    return {
+      'id': c['id'],
+      'user1_id': c['user1_id'],
+      'user2_id': c['user2_id'],
+      'last_message': c['last_message'],
+      'last_message_time': c['last_message_time'],
+      'unread_count': c['unread_count'] ?? 0,
+      'latest_unread': c['latest_unread'],
+      'user1': slim(c['user1']),
+      'user2': slim(c['user2']),
+    };
+  }
+}
+
+class _Entry {
+  final int savedAt;
+  final dynamic data;
+  _Entry(this.savedAt, this.data);
+
+  String encode() => jsonEncode({'savedAt': savedAt, 'data': data});
+
+  static _Entry? decode(String raw) {
+    try {
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      return _Entry(m['savedAt'] as int, m['data']);
+    } catch (_) {
+      return null; // corrupt cache: ignore it
+    }
   }
 }
 
@@ -4355,30 +5320,41 @@ class MessageCache {
 FILE: native/src/dinor_core.h
 ============================================================
 
+/*
+ * Dinor native core (C ABI for Dart FFI).
+ *
+ * Every function that writes into a caller buffer takes out_len (bytes,
+ * including the terminating NUL) and never writes past it. Return values:
+ *   >= 0  number of bytes written (excluding NUL), or a boolean/number result
+ *   -1    invalid input or output buffer too small
+ */
 #pragma once
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-const char* dinor_version();
-int dinor_encrypt(const char* plaintext, char* out, int out_len);
-int dinor_fast_search(const char* haystack, const char* needle);
+/* ---- identity / diagnostics ---- */
+const char* dinor_version(void);
+int dinor_utf8_length(const char* text);                 /* bytes, -1 on NULL */
+
+/* ---- text processing ---- */
+int dinor_encrypt(const char* plaintext, char* out, int out_len);   /* reversible obfuscation, NOT crypto */
+int dinor_fast_search(const char* haystack, const char* needle);    /* 1 = found, case-insensitive */
 int dinor_format_message(const char* input, char* out, int out_len);
 int dinor_extract_web_answer(const char* query, const char* html_text, char* out, int out_len);
+int dinor_sanitize_input(const char* input, char* out, int out_len); /* strips control chars, keeps UTF-8 */
+int dinor_batch_sanitize(const char* input, char* out, int out_len); /* sanitize + collapse spaces + trim */
+int dinor_escape_like(const char* input, char* out, int out_len);   /* escapes % _ \ for ILIKE */
+int dinor_calculate_hash(const char* text);                          /* djb2, 31-bit */
 
-// New High-Performance Text Processing Functions
-int dinor_sanitize_input(const char* input, char* out, int out_len);
-int dinor_calculate_hash(const char* text);
+/* ---- timing / caching ---- */
+long long dinor_fast_timestamp(void);                                /* unix epoch ms */
+int dinor_is_stale(long long saved_at_ms, long long ttl_ms, long long now_ms); /* 1 = stale */
+long long dinor_retry_delay_ms(int attempt, long long base_ms, long long cap_ms); /* exp. backoff */
 
-
-// New Animation & Status Functions
+/* ---- animation / status ---- */
 float dinor_animation_scale(double time_seconds, int dot_index);
 const char* dinor_get_status_icon(int status_code);
-
-
-// New Performance Functions for Caching & Timing
-long long dinor_fast_timestamp();
-int dinor_batch_sanitize(const char* input, char* out, int out_len);
 
 #ifdef __cplusplus
 }
@@ -4390,127 +5366,231 @@ FILE: native/src/dinor_core.cpp
 ============================================================
 
 #include "dinor_core.h"
-#include <chrono>
-#include <cstring>
-#include <cctype>
-#include <string>
-#include <sstream>
-#include <vector>
+
 #include <algorithm>
+#include <cctype>
+#include <vector>
+#include <chrono>
 #include <cmath>
+#include <cstring>
+#include <string>
+
+namespace {
+
+// Copy `s` into out (size out_len). Returns bytes written or -1 if it does not fit.
+int copy_out(const std::string& s, char* out, int out_len) {
+    if (!out || out_len <= 0) return -1;
+    if (static_cast<long long>(s.size()) + 1 > out_len) return -1;
+    std::memcpy(out, s.data(), s.size());
+    out[s.size()] = '\0';
+    return static_cast<int>(s.size());
+}
+
+// Length of the longest prefix of s that is <= max_bytes and does not split a UTF-8 code point.
+size_t utf8_boundary(const std::string& s, size_t max_bytes) {
+    if (s.size() <= max_bytes) return s.size();
+    size_t cut = max_bytes;
+    // Walk back over continuation bytes (10xxxxxx) so we land on a code point start.
+    while (cut > 0 && (static_cast<unsigned char>(s[cut]) & 0xC0) == 0x80) --cut;
+    return cut;
+}
+
+// True for control characters that never belong in chat text.
+bool is_bad_control(unsigned char c) {
+    return (c < 0x20 && c != '\n') || c == 0x7F;
+}
+
+std::string lower_ascii(std::string s) {
+    for (auto& ch : s) {
+        unsigned char c = static_cast<unsigned char>(ch);
+        if (c >= 'A' && c <= 'Z') ch = static_cast<char>(c - 'A' + 'a');
+    }
+    return s;
+}
+
+std::string sanitize_keep_newlines(const char* input) {
+    std::string out;
+    out.reserve(std::strlen(input));
+    for (const char* p = input; *p; ++p) {
+        if (!is_bad_control(static_cast<unsigned char>(*p))) out.push_back(*p);
+    }
+    return out;
+}
+
+}  // namespace
 
 extern "C" {
 
-const char* dinor_version() {
-    return "Dinor 0.5.0 (Animation Core)";
+const char* dinor_version(void) {
+    return "Dinor 0.6.0 (Core)";
+}
+
+int dinor_utf8_length(const char* text) {
+    if (!text) return -1;
+    return static_cast<int>(std::strlen(text));
 }
 
 int dinor_encrypt(const char* plaintext, char* out, int out_len) {
-    int n = strlen(plaintext);
-    if (n + 1 > out_len) return -1;
-    for (int i = 0; i < n; i++) out[i] = plaintext[n - 1 - i];
-    out[n] = '\0';
-    return n;
+    if (!plaintext) return -1;
+    std::string s(plaintext);
+    std::reverse(s.begin(), s.end());
+    return copy_out(s, out, out_len);
 }
 
 int dinor_fast_search(const char* haystack, const char* needle) {
+    if (!haystack || !needle) return 0;
     if (!*needle) return 1;
-    for (const char* h = haystack; *h; ++h) {
-        const char* h_ptr = h;
-        const char* n_ptr = needle;
-        while (*h_ptr && *n_ptr && (tolower(*h_ptr) == tolower(*n_ptr))) {
-            h_ptr++; n_ptr++;
-        }
-        if (!*n_ptr) return 1;
-    }
-    return 0;
+    return lower_ascii(haystack).find(lower_ascii(needle)) != std::string::npos ? 1 : 0;
 }
 
 int dinor_format_message(const char* input, char* out, int out_len) {
+    if (!input) return -1;
     std::string result;
     bool last_was_space = true;
     for (const char* p = input; *p; ++p) {
         if (*p == ' ') {
-            if (!last_was_space) { result += ' '; last_was_space = true; }
+            if (!last_was_space) { result.push_back(' '); last_was_space = true; }
         } else {
-            result += *p; last_was_space = false;
+            result.push_back(*p);
+            last_was_space = false;
         }
     }
     if (!result.empty() && result.back() == ' ') result.pop_back();
-    if (result.length() + 1 > out_len) return -1;
-    strcpy(out, result.c_str());
-    return result.length();
+    return copy_out(result, out, out_len);
 }
 
 int dinor_extract_web_answer(const char* query, const char* html_text, char* out, int out_len) {
-    std::string text(html_text);
-    std::string q(query);
-    std::string best_sentence = "";
-    int max_matches = 0;
+    if (!query || !html_text) return -1;
 
-    std::stringstream ss(text);
-    std::string sentence;
     std::vector<std::string> keywords;
-    std::stringstream qss(q);
-    std::string word;
-    while (qss >> word) {
-        word.erase(std::remove_if(word.begin(), word.end(), ::ispunct), word.end());
-        if (word.length() > 2) keywords.push_back(word);
+    {
+        std::string q(query);
+        size_t i = 0;
+        while (i < q.size()) {
+            while (i < q.size() && std::isspace(static_cast<unsigned char>(q[i]))) ++i;
+            size_t start = i;
+            while (i < q.size() && !std::isspace(static_cast<unsigned char>(q[i]))) ++i;
+            std::string w;
+            for (size_t k = start; k < i; ++k) {
+                if (!std::ispunct(static_cast<unsigned char>(q[k]))) w.push_back(q[k]);
+            }
+            if (w.size() > 2) keywords.push_back(lower_ascii(w));
+        }
     }
 
-    while (std::getline(ss, sentence, '.')) {
-        sentence.erase(0, sentence.find_first_not_of(" \n\r\t"));
-        sentence.erase(sentence.find_last_not_of(" \n\r\t") + 1);
-        if (sentence.length() < 20 || sentence.length() > 300) continue;
+    std::string best;
+    int max_matches = 0;
+    std::string text(html_text);
+    size_t start = 0;
+    while (start <= text.size()) {
+        size_t end = text.find('.', start);
+        if (end == std::string::npos) end = text.size();
+        std::string sentence = text.substr(start, end - start);
+        start = end + 1;
 
+        size_t a = sentence.find_first_not_of(" \n\r\t");
+        if (a == std::string::npos) continue;
+        size_t b = sentence.find_last_not_of(" \n\r\t");
+        sentence = sentence.substr(a, b - a + 1);
+        if (sentence.size() < 20 || sentence.size() > 300) continue;
+
+        std::string lower = lower_ascii(sentence);
         int matches = 0;
         for (const auto& kw : keywords) {
-            if (dinor_fast_search(sentence.c_str(), kw.c_str())) matches++;
+            if (lower.find(kw) != std::string::npos) matches++;
         }
-
         if (matches > max_matches) {
             max_matches = matches;
-            best_sentence = sentence + ".";
+            best = sentence + ".";
         }
     }
 
-    if (best_sentence.empty()) return -1;
-    if (best_sentence.length() + 1 > out_len) return -1;
-    strcpy(out, best_sentence.c_str());
-    return best_sentence.length();
+    if (best.empty()) return -1;
+    return copy_out(best, out, out_len);
 }
 
 int dinor_sanitize_input(const char* input, char* out, int out_len) {
-    int j = 0;
-    for (int i = 0; input[i] != '\0' && j < out_len - 1; ++i) {
-        if (input[i] != '\0' && input[i] != '\r' && input[i] != '\t') {
-            out[j++] = input[i];
+    if (!input || !out || out_len <= 0) return -1;
+    std::string clean = sanitize_keep_newlines(input);
+    clean = clean.substr(0, utf8_boundary(clean, static_cast<size_t>(out_len - 1)));
+    return copy_out(clean, out, out_len);
+}
+
+int dinor_batch_sanitize(const char* input, char* out, int out_len) {
+    if (!input || !out || out_len <= 0) return -1;
+    std::string result;
+    result.reserve(std::strlen(input));
+    bool last_was_space = true;
+    for (const char* p = input; *p; ++p) {
+        unsigned char c = static_cast<unsigned char>(*p);
+        if (is_bad_control(c) || c == '\n' || c == '\r' || c == '\t') {
+            // Treat line breaks and tabs as a single space; drop other controls.
+            if ((c == '\n' || c == '\r' || c == '\t') && !last_was_space) {
+                result.push_back(' ');
+                last_was_space = true;
+            }
+            continue;
+        }
+        if (c == ' ') {
+            if (!last_was_space) { result.push_back(' '); last_was_space = true; }
+        } else {
+            result.push_back(*p);
+            last_was_space = false;
         }
     }
-    out[j] = '\0';
-    return j;
+    while (!result.empty() && result.back() == ' ') result.pop_back();
+    result = result.substr(0, utf8_boundary(result, static_cast<size_t>(out_len - 1)));
+    return copy_out(result, out, out_len);
+}
+
+int dinor_escape_like(const char* input, char* out, int out_len) {
+    if (!input) return -1;
+    std::string r;
+    for (const char* p = input; *p; ++p) {
+        if (*p == '%' || *p == '_' || *p == '\\') r.push_back('\\');
+        r.push_back(*p);
+    }
+    return copy_out(r, out, out_len);
 }
 
 int dinor_calculate_hash(const char* text) {
+    if (!text) return 0;
     unsigned long hash = 5381;
-    int c;
-    while ((c = *text++)) {
-        hash = ((hash << 5) + hash) + c;
+    for (const unsigned char* p = reinterpret_cast<const unsigned char*>(text); *p; ++p) {
+        hash = ((hash << 5) + hash) + *p;
     }
-    return (int)(hash & 0x7FFFFFFF);
+    return static_cast<int>(hash & 0x7FFFFFFFUL);
+}
+
+long long dinor_fast_timestamp(void) {
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+}
+
+int dinor_is_stale(long long saved_at_ms, long long ttl_ms, long long now_ms) {
+    if (saved_at_ms <= 0 || ttl_ms <= 0) return 1;      // never saved / no TTL: treat as stale
+    if (now_ms < saved_at_ms) return 1;                  // clock went backwards: refresh
+    return (now_ms - saved_at_ms) > ttl_ms ? 1 : 0;
+}
+
+long long dinor_retry_delay_ms(int attempt, long long base_ms, long long cap_ms) {
+    if (attempt < 0) attempt = 0;
+    if (base_ms <= 0) base_ms = 250;
+    if (cap_ms < base_ms) cap_ms = base_ms;
+    double d = static_cast<double>(base_ms) * std::pow(2.0, std::min(attempt, 30));
+    return static_cast<long long>(std::min(d, static_cast<double>(cap_ms)));
 }
 
 float dinor_animation_scale(double time_seconds, int dot_index) {
     double delay = dot_index * 0.2;
-    double progress = fmod(time_seconds - delay, 1.0);
+    double progress = std::fmod(time_seconds - delay, 1.0);
     if (progress < 0) progress += 1.0;
-    
     double scale = 1.0 + (0.6 * (progress < 0.5 ? progress * 2 : (1 - progress) * 2));
-    return (float)scale;
+    return static_cast<float>(scale);
 }
 
 const char* dinor_get_status_icon(int status_code) {
-    switch(status_code) {
+    switch (status_code) {
         case 0: return "sending";
         case 1: return "sent";
         case 2: return "failed";
@@ -4518,33 +5598,7 @@ const char* dinor_get_status_icon(int status_code) {
     }
 }
 
-long long dinor_fast_timestamp() {
-    auto now = std::chrono::system_clock::now();
-    auto duration = now.time_since_epoch();
-    return std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
-}
-
-int dinor_batch_sanitize(const char* input, char* out, int out_len) {
-    int j = 0;
-    bool last_was_space = true;
-    for (int i = 0; input[i] != '\0' && j < out_len - 1; ++i) {
-        if (input[i] != '\r' && input[i] != '\n' && input[i] != '\t') {
-            if (input[i] == ' ') {
-                if (!last_was_space) {
-                    out[j++] = ' ';
-                    last_was_space = true;
-                }
-            } else {
-                out[j++] = input[i];
-                last_was_space = false;
-            }
-        }
-    }
-    out[j] = '\0';
-    return j;
-}
-
-}
+}  // extern "C"
 
 
 ============================================================
@@ -4552,6 +5606,7 @@ FILE: supabase/.temp/linked-project.json
 ============================================================
 
 {"ref":"skvgbzftnbditpztqewl","name":"Dinor_db","organization_id":"ungdzflilcouaonnafqt","organization_slug":"ungdzflilcouaonnafqt"}
+
 
 ============================================================
 FILE: supabase/migrations/20261023181242_create_chat_tables.sql
@@ -5493,9 +6548,60 @@ FILE: android/app/src/main/kotlin/com/dinor/dinor/MainActivity.kt
 
 package com.dinor.dinor
 
+import android.content.Context
+import android.media.Ringtone
+import android.media.RingtoneManager
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity()
+class MainActivity : FlutterActivity() {
+    private var ringtone: Ringtone? = null
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dinor/ring")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "start" -> { startRinging(); result.success(null) }
+                    "stop" -> { stopRinging(); result.success(null) }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    private fun vibrator(): Vibrator? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        }
+
+    private fun startRinging() {
+        stopRinging()
+        val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+        ringtone = RingtoneManager.getRingtone(applicationContext, uri)?.also { r ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) r.isLooping = true
+            r.play()
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Buzz 0.8s, pause 0.6s, repeat until stopped.
+            val pattern = longArrayOf(0, 800, 600)
+            vibrator()?.vibrate(VibrationEffect.createWaveform(pattern, 0))
+        }
+    }
+
+    private fun stopRinging() {
+        ringtone?.stop()
+        ringtone = null
+        vibrator()?.cancel()
+    }
+}
 
 
 ============================================================
@@ -5822,7 +6928,11 @@ FILE: android/app/src/main/AndroidManifest.xml
 
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Permissions for Media Picker -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+        <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+<uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 

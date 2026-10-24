@@ -40,6 +40,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int _searchSeq = 0;  // drops out-of-order search responses
   bool _incomingDialogOpen = false;
   BuildContext? _dialogContext;
+  Timer? _homePoll;
 
   @override
   void initState() {
@@ -57,6 +58,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // 3. Realtime updates, debounced so bursts trigger one refresh.
     _subscribeRealtime();
+    // Fallback: refresh the chat list regularly, in case Realtime lags.
+    _homePoll = Timer.periodic(const Duration(seconds: 6), (_) => _scheduleRefresh());
 
     // 4. Calls addressed to this user.
     CallService.startIncomingListener();
@@ -84,6 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _refreshDebounce?.cancel();
     _searchDebounce?.cancel();
+    _homePoll?.cancel();
     _convChannel?.unsubscribe();
     CallService.incoming.removeListener(_onIncomingCall);
     _searchFocus.dispose();

@@ -66,6 +66,9 @@ class CallService {
 
   static Future<void> _iceWriteChain = Future.value();
   static Timer? _ringTimer;
+  static Timer? _callPoll;
+  static Timer? _incomingPoll;
+  static final Set<String> _seenCallIds = {};
 
   static String? get currentCallId => _callId;
 
@@ -112,12 +115,64 @@ class CallService {
           callback: (payload) => _onIncomingUpdate(payload.newRecord),
         )
         .subscribe();
+
+    // Fallback: check for calls directly, so ringing works even if Realtime lags.
+    _incomingPoll?.cancel();
+    _incomingPoll = Timer.periodic(const Duration(seconds: 3), (_) => _pollIncoming());
   }
 
   static void stopIncomingListener() {
     _incomingChannel?.unsubscribe();
     _incomingChannel = null;
+    _incomingPoll?.cancel();
+    _incomingPoll = null;
     _clearIncoming();
+  }
+
+  /// Polling fallback for incoming calls and cancellations.
+  static Future<void> _pollIncoming() async {
+    final me = _db.auth.currentUser?.id;
+    if (me == null) return;
+    try {
+      final current = incoming.value;
+      if (current != null) {
+        final row = await _db.from('calls').select('status').eq('id', current.callId).maybeSingle();
+        if (row == null || row['status'] != 'ringing') _clearIncoming();
+        return;
+      }
+      if (phase.value != CallPhase.idle) return;
+      final since = DateTime.now().toUtc().subtract(const Duration(seconds: 60)).toIso8601String();
+      final rows = await _db
+          .from('calls')
+          .select()
+          .eq('receiver_id', me)
+          .eq('status', 'ringing')
+          .gt('created_at', since)
+          .order('created_at', ascending: false)
+          .limit(1);
+      for (final r in List<Map<String, dynamic>>.from(rows)) {
+        await _onIncomingRow(r);
+      }
+    } catch (e) {
+      debugPrint('incoming poll: $e');
+    }
+  }
+
+  /// Polling fallback for an active call: keeps signaling moving without Realtime.
+  static void _startCallPoll() {
+    _callPoll?.cancel();
+    _callPoll = Timer.periodic(const Duration(seconds: 2), (_) => _pollCall());
+  }
+
+  static Future<void> _pollCall() async {
+    final id = _callId;
+    if (id == null) return;
+    try {
+      final row = await _db.from('calls').select().eq('id', id).maybeSingle();
+      if (row != null && id == _callId) await _applyRow(row);
+    } catch (e) {
+      debugPrint('call poll: $e');
+    }
   }
 
   static void _clearIncoming() {
@@ -127,6 +182,8 @@ class CallService {
 
   static Future<void> _onIncomingRow(Map<String, dynamic> row) async {
     if (row['status'] != 'ringing') return;
+    // Realtime and polling can both report the same call: handle it once.
+    if (!_seenCallIds.add(row['id'].toString())) return;
     if (phase.value != CallPhase.idle) {
       // Already on a call: decline so the caller does not ring forever.
       await _declineRow(row['id'].toString());
@@ -203,6 +260,7 @@ class CallService {
       }).eq('id', _callId!);
 
       _subscribe();
+      _startCallPoll();
       // Catch an answer that was written before the subscription went live.
       final current = await _db.from('calls').select().eq('id', _callId!).single();
       await _applyRow(current);
@@ -261,6 +319,7 @@ class CallService {
       }).eq('id', callId);
 
       _subscribe();
+      _startCallPoll();
       await _applyRow(row);
     } catch (e) {
       debugPrint('acceptCall failed: $e');
@@ -417,6 +476,8 @@ class CallService {
     lastEndReason = reason;
     _ringTimer?.cancel();
     _ringTimer = null;
+    _callPoll?.cancel();
+    _callPoll = null;
 
     // Take ownership of everything first, so a second call cannot touch it.
     final id = _callId;
