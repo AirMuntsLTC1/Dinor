@@ -193,8 +193,8 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
-  Future<void> _sendMessage() async {
-    final rawText = _textController.text.trim();
+  Future<void> _sendMessage({String? customText}) async {
+    final rawText = customText ?? _textController.text.trim();
     if (rawText.isEmpty) return;
 
     String text = rawText;
@@ -205,7 +205,7 @@ class _ChatScreenState extends State<ChatScreen> {
       debugPrint("C++ Sanitize failed: $e");
     }
 
-    _textController.clear();
+    if (customText == null) _textController.clear();
 
     if (widget.isAi) {
       setState(() => _messages.add(Message(DateTime.now().toString(), text, true)));
@@ -339,7 +339,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     maxScale: 4.0,
                     child: Center(
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(24), // Smooth iOS rounded corners
                         child: CachedNetworkImage(
                           imageUrl: img.text,
                           width: double.infinity,

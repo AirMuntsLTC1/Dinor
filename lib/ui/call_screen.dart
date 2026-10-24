@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import '../chat/call_service.dart';
+import '../chat/chat_service.dart';
 
 class CallScreen extends StatefulWidget {
   final String receiverName;
@@ -21,6 +22,11 @@ class CallScreen extends StatefulWidget {
 class _CallScreenState extends State<CallScreen> {
   String _status = 'Calling';
   bool _isEnded = false;
+  
+  // Timer logic
+  Timer? _timer;
+  int _secondsElapsed = 0;
+  bool _isConnected = false;
 
   @override
   void initState() {
@@ -33,18 +39,75 @@ class _CallScreenState extends State<CallScreen> {
       await CallService.startCall(widget.receiverId!, widget.conversationId);
     }
     
-    // Simulate the "Ringing" state after 3 seconds for the UI
+    // Simulate the call being picked up after 3 seconds
     Future.delayed(const Duration(seconds: 3), () {
       if (mounted && !_isEnded) {
-        setState(() => _status = 'Ringing');
+        setState(() {
+          _status = 'Connected';
+          _isConnected = true;
+        });
+        _startTimer();
       }
     });
   }
 
-  void _endCall() async {
+  void _startTimer() {
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) {
+        setState(() => _secondsElapsed++);
+      }
+    });
+  }
+
+  String _formatTime(int seconds) {
+    final minutes = (seconds ~/ 60).toString().padLeft(2, '0');
+    final secs = (seconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$secs';
+  }
+
+  Future<void> _endCall() async {
+    _timer?.cancel();
     setState(() => _isEnded = true);
     await CallService.endCall();
+    
+    // Log the call in the chat
+    if (_isConnected) {
+      // Insert a call message into Supabase
+      try {
+        final supabase = Supabase.instance.client;
+        final userId = supabase.auth.currentUser!.id;
+        
+        String callDuration = _formatTime(_secondsElapsed);
+        // Check if I am the caller or receiver to format the message correctly
+        final myId = supabase.auth.currentUser!.id;
+        // Since this is a simple implementation, we assume the current user is the caller for this screen
+        String callText = "📞 Outgoing call (Duration: $callDuration)";
+        
+        await supabase.from('messages').insert({
+          'sender_id': userId,
+          'content': callText,
+          'is_image': false,
+          'conversation_id': widget.conversationId,
+          'is_read': true, // Call logs are read by default
+        });
+
+        await supabase.from('conversations').update({
+          'last_message': callText,
+          'last_message_time': DateTime.now().toUtc().toIso8601String(),
+        }).eq('id', widget.conversationId);
+
+      } catch (e) {
+        debugPrint("Failed to log call: $e");
+      }
+    }
+
     if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -68,12 +131,12 @@ class _CallScreenState extends State<CallScreen> {
               
               // Status Text
               Text(
-                '$_status...',
+                _isConnected ? _formatTime(_secondsElapsed) : '$_status...',
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 24,
+                  fontSize: 28,
                   fontWeight: FontWeight.w300,
-                  letterSpacing: 1.5,
+                  letterSpacing: 2,
                 ),
               ),
               
@@ -118,8 +181,8 @@ class _CallScreenState extends State<CallScreen> {
               
               const Spacer(),
               
-              // Calling Dots Animation
-              if (!_isEnded) const AnimatedCallingDots(),
+              // Calling Dots Animation (Only show if not connected)
+              if (!_isEnded && !_isConnected) const AnimatedCallingDots(),
               
               const Spacer(),
               
@@ -147,7 +210,6 @@ class _CallScreenState extends State<CallScreen> {
   }
 }
 
-// Animated 3 dots
 class AnimatedCallingDots extends StatefulWidget {
   const AnimatedCallingDots({super.key});
 
@@ -183,17 +245,10 @@ class _AnimatedCallingDotsState extends State<AnimatedCallingDots> with SingleTi
           mainAxisAlignment: MainAxisAlignment.center,
           children: List.generate(3, (index) {
             double scale = 1.0;
-            try {
-              // Use the C++ function if available
-              // scale = DinorCore.load().getAnimationScale(t, index);
-              // Fallback for now to avoid C++ import issues in this standalone file
-              double delay = index * 0.2;
-              double progress = (t - delay) % 1.0;
-              if (progress < 0) progress += 1.0;
-              scale = 1.0 + (0.8 * (progress < 0.5 ? progress * 2 : (1 - progress) * 2));
-            } catch (e) {
-              // Fallback
-            }
+            double delay = index * 0.2;
+            double progress = (t - delay) % 1.0;
+            if (progress < 0) progress += 1.0;
+            scale = 1.0 + (0.8 * (progress < 0.5 ? progress * 2 : (1 - progress) * 2));
             
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
