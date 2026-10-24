@@ -80,20 +80,32 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _openChat(String otherUserId, String name) async {
     _searchFocus.unfocus();
-    // 1. OPTIMISTIC NAVIGATION: Open immediately
+    
+    // 1. Find the conversation ID
     final convId = await ChatService.getOrCreateConversation(otherUserId);
+    
     if (mounted) {
-      // Clear unread count locally instantly before opening
+      // 2. Clear unread count locally INSTANTLY in the UI before we even open the chat
       setState(() {
-        // The UI will refresh via realtime, but we can trigger a quick local refresh
+        for (var conv in _conversations) {
+          if (conv['id'] == convId) {
+            conv['unread_count'] = 0;
+            conv['latest_unread'] = null;
+          }
+        }
       });
 
+      // 3. Open the chat
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => ChatScreen(title: name, conversationId: convId, otherUserId: otherUserId),
         ),
-      ).then((_) => _fetchConversations()); // Refresh when coming back
+      ).then((_) {
+        // 4. When returning from the chat, force a fresh fetch from the database
+        // This guarantees the badge is gone
+        _fetchConversations(); 
+      });
     }
   }
 
