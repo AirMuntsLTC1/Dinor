@@ -60,7 +60,6 @@ class _ChatScreenState extends State<ChatScreen> {
   Message? _selectedMessage;
   int? _selectedMessageIndex;
   OverlayEntry? _menuOverlay;
-  final GlobalKey _selectedMessageKey = GlobalKey();
 
   final supabase = Supabase.instance.client;
   RealtimeChannel? _chatChannel;
