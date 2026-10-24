@@ -1,0 +1,1085 @@
+============================================================
+ FULL DINOR PROJECT EXPORT - skvgbzftnbditpztqewl 
+============================================================
+
+
+
+--- COLUMNS ---
+[public.email_code_rate_limits] request_count
+[storage.s3_multipart_uploads_parts] part_number
+[storage.s3_multipart_uploads_parts] created_at
+[storage.buckets_analytics] type
+[storage.buckets_analytics] created_at
+[storage.buckets_analytics] updated_at
+[storage.buckets_analytics] id
+[storage.buckets_analytics] deleted_at
+[storage.buckets_vectors] type
+[storage.buckets_vectors] created_at
+[storage.buckets_vectors] updated_at
+[storage.vector_indexes] dimension
+[storage.vector_indexes] metadata_configuration
+[storage.vector_indexes] created_at
+[storage.vector_indexes] updated_at
+[public.profiles] id
+[public.profiles] updated_at
+[public.messages] id
+[public.messages] sender_id
+[public.messages] is_image
+[public.messages] created_at
+[public.messages] conversation_id
+[public.messages] is_read
+[public.google_oauth_credentials] updated_at
+[public.conversations] id
+[public.conversations] created_at
+[public.conversations] user1_id
+[public.conversations] user2_id
+[public.conversations] last_message_time
+[public.analytics] id
+[public.analytics] metadata
+[public.analytics] created_at
+[public.calls] id
+[public.calls] caller_id
+[public.calls] receiver_id
+[public.calls] conversation_id
+[public.calls] offer
+[public.calls] answer
+[public.calls] caller_ice
+[public.calls] receiver_ice
+[public.calls] created_at
+[public.email_code_rate_limits] last_sent_at
+[public.email_code_rate_limits] window_started_at
+[storage.migrations] id
+[storage.migrations] executed_at
+[storage.objects] id
+[storage.objects] owner
+[storage.objects] created_at
+[storage.objects] updated_at
+[storage.objects] last_accessed_at
+[storage.objects] metadata
+[storage.objects] user_metadata
+[storage.objects] archived_at
+[storage.objects] is_delete_marker
+[storage.objects] is_versioned
+[storage.buckets] owner
+[storage.buckets] created_at
+[storage.buckets] updated_at
+[storage.buckets] public
+[storage.buckets] avif_autodetection
+[storage.buckets] file_size_limit
+[storage.buckets] type
+[storage.buckets] lifecycle_configuration
+[storage.buckets] lifecycle_configuration_generation
+[storage.s3_multipart_uploads] in_progress_size
+[storage.s3_multipart_uploads] created_at
+[storage.s3_multipart_uploads] user_metadata
+[storage.s3_multipart_uploads] metadata
+[storage.s3_multipart_uploads_parts] id
+[storage.s3_multipart_uploads_parts] size
+[public.analytics] event_type
+[storage.migrations] hash
+[storage.s3_multipart_uploads_parts] upload_id
+[storage.vector_indexes] distance_metric
+[storage.objects] bucket_id
+[storage.objects] name
+[public.conversations] last_message
+[storage.s3_multipart_uploads_parts] bucket_id
+[storage.vector_indexes] bucket_id
+[storage.vector_indexes] data_type
+[storage.migrations] name
+[storage.s3_multipart_uploads_parts] etag
+[storage.s3_multipart_uploads_parts] owner_id
+[storage.objects] path_tokens
+[storage.objects] version
+[storage.objects] owner_id
+[storage.s3_multipart_uploads_parts] version
+[public.calls] status
+[storage.buckets_analytics] name
+[public.email_code_rate_limits] email
+[storage.buckets] id
+[storage.buckets] name
+[storage.buckets_analytics] format
+[public.messages] album_id
+[public.profiles] username
+[public.profiles] avatar_url
+[public.messages] caption
+[storage.buckets_vectors] id
+[storage.buckets] allowed_mime_types
+[storage.buckets] owner_id
+[public.google_oauth_credentials] id
+[storage.buckets] versioning_status
+[public.google_oauth_credentials] refresh_token
+[public.messages] content
+[storage.s3_multipart_uploads] id
+[storage.vector_indexes] id
+[storage.s3_multipart_uploads] upload_signature
+[storage.s3_multipart_uploads] bucket_id
+[storage.s3_multipart_uploads] version
+[storage.s3_multipart_uploads] owner_id
+[storage.s3_multipart_uploads_parts] key
+[storage.vector_indexes] name
+[storage.s3_multipart_uploads] key
+
+
+--- POLICYS ---
+[storage.objects] Auth Upload
+[storage.objects] Public Access
+[public.profiles] Users can update their own profile
+[public.profiles] Authenticated users can view all profiles
+[public.profiles] Users can insert their own profile.
+[public.profiles] Public profiles are viewable by everyone.
+[public.messages] Users can update messages in their conversations
+[public.messages] Users can insert their own messages
+[public.messages] Messages are viewable by everyone
+[public.google_oauth_credentials] Only service role can access credentials
+[public.conversations] Users can update their own conversations.
+[public.conversations] Users can insert conversations.
+[public.conversations] Users can view their own conversations.
+[public.analytics] Admins can read analytics
+[public.analytics] Anyone can insert analytics
+[public.calls] Users can update calls they are part of
+[public.calls] Users can create calls
+[public.calls] Users can see calls involving them
+
+
+--- INDEXS ---
+[storage.migrations] migrations_pkey
+[storage.migrations] migrations_name_key
+[storage.objects] objects_pkey
+[storage.objects] name_prefix_search
+[storage.objects] idx_objects_bucket_id_name
+[storage.objects] idx_objects_bucket_id_name_lower
+[storage.objects] objects_bucket_id_name_version_key
+[storage.objects] idx_objects_current_version
+[storage.objects] idx_objects_delete_markers
+[storage.objects] idx_objects_null_version
+[storage.buckets] buckets_pkey
+[storage.buckets] bname
+[storage.s3_multipart_uploads] s3_multipart_uploads_pkey
+[storage.s3_multipart_uploads] idx_multipart_uploads_list
+[storage.s3_multipart_uploads_parts] s3_multipart_uploads_parts_pkey
+[storage.buckets_analytics] buckets_analytics_pkey
+[storage.buckets_analytics] buckets_analytics_unique_name_idx
+[storage.buckets_vectors] buckets_vectors_pkey
+[storage.vector_indexes] vector_indexes_pkey
+[storage.vector_indexes] vector_indexes_name_bucket_id_idx
+[public.profiles] profiles_pkey
+[public.profiles] profiles_username_key
+[public.messages] messages_pkey
+[public.google_oauth_credentials] google_oauth_credentials_pkey
+[public.conversations] conversations_pkey
+[public.analytics] analytics_pkey
+[public.calls] calls_pkey
+[public.email_code_rate_limits] email_code_rate_limits_pkey
+
+
+--- REALTIMES ---
+[public.messages] enabled
+[public.conversations] enabled
+[public.calls] enabled
+[public.analytics] enabled
+
+
+--- BUCKETS ---
+[chat_media] Public
+
+
+============================================================
+ EDGE FUNCTIONS SOURCE CODE 
+============================================================
+
+
+--- FUNCTION: chat-ai ---
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+async function searchGoogleNews(query: string): Promise<string> {
+  try {
+    const response = await fetch(`https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`);
+    const xml = await response.text();
+    const items: string[] = [];
+    const itemBlocks = xml.split('<item>');
+    for (let i = 1; i < itemBlocks.length && items.length < 5; i++) {
+      const titleMatch = itemBlocks[i].match(/<title>(.*?)<\/title>/);
+      if (titleMatch && titleMatch[1]) {
+        items.push(`- ${titleMatch[1].replace(/<[^>]+>/g, '').trim()}`);
+      }
+    }
+    return items.join('\n');
+  } catch (e) { return ""; }
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+
+  try {
+    const body = await req.json();
+    const userMessage = body.userMessage || "Hello";
+    const imageBase64 = body.imageBase64;
+
+    const groqApiKey = Deno.env.get('GROQ_API_KEY')
+    if (!groqApiKey) throw new Error("Missing GROQ_API_KEY")
+
+    const modelsRes = await fetch('https://api.groq.com/openai/v1/models', {
+      headers: { 'Authorization': `Bearer ${groqApiKey}` }
+    });
+    const modelsData = await modelsRes.json();
+    const availableModels: string[] = modelsData.data?.map((m: any) => m.id) || [];
+
+    // -------------------------
+    // VISION MODEL
+    // -------------------------
+    if (imageBase64) {
+      const visionModel = "llama-3.2-11b-vision-preview";
+      if (!availableModels.includes(visionModel)) {
+        return new Response(JSON.stringify({ reply: "Vision model is not available on your Groq account." }), { headers: corsHeaders });
+      }
+
+      const visionRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${groqApiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: visionModel,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: userMessage },
+                { type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageBase64}` } }
+              ]
+            }
+          ],
+          max_tokens: 500,
+        }),
+      });
+
+      const visionData = await visionRes.json();
+      if (visionData.choices && visionData.choices.length > 0) {
+        return new Response(JSON.stringify({ reply: visionData.choices[0].message.content.trim() }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      throw new Error(`Vision failed: ${JSON.stringify(visionData)}`);
+    }
+
+    // -------------------------
+    // TEXT MODEL
+    // -------------------------
+    const modelsToTry = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "allam-2-7b"]
+      .filter(m => availableModels.includes(m));
+    const model = modelsToTry[0];
+    if (!model) throw new Error("No text models available.");
+
+    const webContext = await searchGoogleNews(userMessage);
+    let finalPrompt = webContext 
+      ? `News context:\n${webContext}\n\nUser Question: ${userMessage}\n\nAnswer directly.`
+      : `User Question: ${userMessage}\n\nAnswer directly.`;
+
+    const finalRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${groqApiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          { role: "system", content: "You are Dinor AI. Answer confidently." },
+          { role: "user", content: finalPrompt }
+        ],
+        temperature: 0.3,
+        max_tokens: 400,
+      }),
+    });
+
+    const finalData = await finalRes.json();
+    if (finalData.choices && finalData.choices.length > 0) {
+      return new Response(JSON.stringify({ reply: finalData.choices[0].message.content.trim() }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    
+    throw new Error(`AI failed: ${JSON.stringify(finalData)}`);
+
+  } catch (error) {
+    // Catch ANY error and return it as a clean string reply
+    return new Response(JSON.stringify({ reply: `AI Error: ${error.message}` }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+})
+
+
+
+--- FUNCTION: google-oauth-callback ---
+import { createClient } from "npm:@supabase/supabase-js@2";
+
+const COOKIE = "dinor_oauth_state";
+
+function page(message: string, status = 200, clearCookie = false) {
+  const headers = new Headers({
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+  });
+
+  if (clearCookie) {
+    headers.append(
+      "Set-Cookie",
+      `${COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/functions/v1/google-oauth-callback; Max-Age=0`,
+    );
+  }
+
+  return new Response(
+    `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><h2>Dinor Google setup</h2><p>${message}</p></body></html>`,
+    { status, headers },
+  );
+}
+
+function getCookie(req: Request, name: string): string | null {
+  const cookie = req.headers.get("cookie") ?? "";
+  for (const part of cookie.split(";")) {
+    const [key, ...value] = part.trim().split("=");
+    if (key === name) return value.join("=");
+  }
+  return null;
+}
+
+Deno.serve(async (req) => {
+  if (req.method !== "GET") {
+    return page("Method not allowed.", 405);
+  }
+
+  const clientId = Deno.env.get("GOOGLE_CLIENT_ID");
+  const clientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET");
+  const redirectUri = Deno.env.get("GOOGLE_REDIRECT_URI");
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+  if (
+    !clientId || !clientSecret || !redirectUri ||
+    !supabaseUrl || !serviceRoleKey
+  ) {
+    console.error("Required OAuth or Supabase environment variables are missing.");
+    return page("Server configuration is incomplete.", 500);
+  }
+
+  const url = new URL(req.url);
+  const code = url.searchParams.get("code");
+  const returnedState = url.searchParams.get("state");
+  const googleError = url.searchParams.get("error");
+
+  if (googleError) {
+    return page("Google authorization was cancelled or denied.", 400, true);
+  }
+
+  // Start OAuth when Google has not redirected back with an authorization code.
+  if (!code) {
+    const stateBytes = crypto.getRandomValues(new Uint8Array(32));
+    const state = Array.from(stateBytes, (b) =>
+      b.toString(16).padStart(2, "0")
+    ).join("");
+
+    const authorize = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    authorize.searchParams.set("client_id", clientId);
+    authorize.searchParams.set("redirect_uri", redirectUri);
+    authorize.searchParams.set("response_type", "code");
+    authorize.searchParams.set(
+      "scope",
+      "https://www.googleapis.com/auth/gmail.send",
+    );
+    authorize.searchParams.set("access_type", "offline");
+    authorize.searchParams.set("prompt", "consent");
+    authorize.searchParams.set("state", state);
+
+    return new Response(null, {
+      status: 302,
+      headers: {
+        "Location": authorize.toString(),
+        "Cache-Control": "no-store",
+        "Set-Cookie":
+          `${COOKIE}=${state}; HttpOnly; Secure; SameSite=Lax; Path=/functions/v1/google-oauth-callback; Max-Age=600`,
+      },
+    });
+  }
+
+  // Validate the OAuth state to protect against forged callbacks.
+  const savedState = getCookie(req, COOKIE);
+  if (
+    !returnedState || !savedState ||
+    returnedState.length !== savedState.length
+  ) {
+    return page("OAuth state validation failed. Start again.", 400, true);
+  }
+
+  // Constant-time state comparison.
+  const encoder = new TextEncoder();
+  const a = encoder.encode(returnedState);
+  const b = encoder.encode(savedState);
+  let difference = a.length ^ b.length;
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    difference |= a[i] ^ b[i];
+  }
+  if (difference !== 0) {
+    return page("OAuth state validation failed. Start again.", 400, true);
+  }
+
+  try {
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        grant_type: "authorization_code",
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      console.error("Google token exchange failed with status", tokenResponse.status);
+      return page("Google token exchange failed. Please start again.", 502, true);
+    }
+
+    const tokens = await tokenResponse.json();
+    if (typeof tokens.refresh_token !== "string" || !tokens.refresh_token) {
+      return page(
+        "Google did not issue a refresh token. Revoke this app's Google access and repeat consent.",
+        400,
+        true,
+      );
+    }
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const { error } = await supabase
+      .from("google_oauth_credentials")
+      .upsert({
+        id: "gmail",
+        refresh_token: tokens.refresh_token,
+        updated_at: new Date().toISOString(),
+      });
+
+    if (error) {
+      console.error("Could not save OAuth credentials:", error.message);
+      return page("The token was obtained but could not be stored securely.", 500, true);
+    }
+
+    return page(
+      "Google authorization succeeded. The refresh token was saved server-side. You can close this page.",
+      200,
+      true,
+    );
+  } catch (error) {
+    console.error(
+      "OAuth callback failed:",
+      error instanceof Error ? error.message : "Unknown error",
+    );
+    return page("OAuth setup failed. Check the Edge Function logs.", 500, true);
+  }
+});
+
+
+
+--- FUNCTION: request-email-code ---
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+
+const cors = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Content-Type": "application/json",
+};
+
+function reply(status: number, body: Record<string, unknown>) {
+  return new Response(JSON.stringify(body), { status, headers: cors });
+}
+
+function base64Url(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+  if (req.method !== "POST") return reply(405, { error: "POST required" });
+  if (!req.headers.get("apikey")) return reply(401, { error: "Missing API key" });
+
+  try {
+    const body = await req.json();
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+
+    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return reply(400, { error: "Enter a valid email address." });
+    }
+
+    const url = Deno.env.get("SUPABASE_URL");
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const googleClientId = Deno.env.get("GOOGLE_CLIENT_ID");
+    const googleClientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET");
+
+    if (!url || !serviceKey || !googleClientId || !googleClientSecret) {
+      console.error("Required server secrets are missing.");
+      return reply(500, { error: "Email login is not configured." });
+    }
+
+    const admin = createClient(url, serviceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    // Limit each address to one request per minute and five per hour.
+    const now = Date.now();
+    const { data: limit, error: limitError } = await admin
+      .from("email_code_rate_limits")
+      .select("last_sent_at, window_started_at, request_count")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (limitError) throw limitError;
+
+    if (limit) {
+      const last = Date.parse(limit.last_sent_at);
+      const start = Date.parse(limit.window_started_at);
+      if (now - last < 60_000) {
+        return reply(429, { error: "Please wait a minute before requesting another code." });
+      }
+      if (now - start < 3_600_000 && Number(limit.request_count) >= 5) {
+        return reply(429, { error: "Too many requests. Try again in an hour." });
+      }
+
+      const resetWindow = now - start >= 3_600_000;
+      const { error } = await admin.from("email_code_rate_limits").update({
+        last_sent_at: new Date(now).toISOString(),
+        window_started_at: resetWindow ? new Date(now).toISOString() : limit.window_started_at,
+        request_count: resetWindow ? 1 : Number(limit.request_count) + 1,
+      }).eq("email", email);
+      if (error) throw error;
+    } else {
+      const { error } = await admin.from("email_code_rate_limits").insert({
+        email,
+        last_sent_at: new Date(now).toISOString(),
+        window_started_at: new Date(now).toISOString(),
+        request_count: 1,
+      });
+      if (error) throw error;
+    }
+
+    // Generate a Supabase Auth OTP, not an independent custom password.
+    const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
+      type: "magiclink",
+      email,
+    });
+
+    // Avoid revealing whether an account exists.
+    if (linkError || !linkData?.properties?.email_otp) {
+      return reply(200, {
+        message: "If an eligible account exists, a sign-in code will be sent.",
+      });
+    }
+
+    const { data: credential, error: credentialError } = await admin
+      .from("google_oauth_credentials")
+      .select("refresh_token")
+      .eq("id", "gmail")
+      .single();
+
+    if (credentialError || !credential?.refresh_token) {
+      console.error("Gmail refresh token is unavailable.");
+      return reply(500, { error: "Email delivery is not configured." });
+    }
+
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: googleClientId,
+        client_secret: googleClientSecret,
+        refresh_token: credential.refresh_token,
+        grant_type: "refresh_token",
+      }),
+    });
+
+    const tokenData = await tokenResponse.json();
+    if (!tokenResponse.ok || !tokenData.access_token) {
+      console.error("Google access-token refresh failed.");
+      return reply(502, { error: "Gmail authorization failed. Reconnect Gmail." });
+    }
+
+    const mime = [
+      `To: ${email}`,
+      "Subject: Your Dinor sign-in code",
+      "MIME-Version: 1.0",
+      "Content-Type: text/plain; charset=UTF-8",
+      "",
+      `Your Dinor six-digit sign-in code is: ${linkData.properties.email_otp}`,
+      "",
+      "Enter this code in the Dinor app to sign in.",
+      "If you did not request this code, you can ignore this email.",
+    ].join("\r\n");
+
+    const gmailResponse = await fetch(
+      "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenData.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ raw: base64Url(mime) }),
+      },
+    );
+
+    if (!gmailResponse.ok) {
+      console.error("Gmail API send failed:", gmailResponse.status);
+      return reply(502, { error: "Could not send the code. Please try again later." });
+    }
+
+    return reply(200, {
+      message: "If an eligible account exists, a sign-in code will be sent.",
+    });
+  } catch (error) {
+    console.error("request-email-code failed:", error);
+    return reply(500, { error: "Could not request a sign-in code." });
+  }
+});
+
+
+
+--- FUNCTION: verify-email-code ---
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+
+const cors = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Content-Type": "application/json",
+};
+
+function reply(status: number, body: Record<string, unknown>) {
+  return new Response(JSON.stringify(body), { status, headers: cors });
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+  if (req.method !== "POST") return reply(405, { error: "POST required" });
+
+  // The Flutter client supplies its public Supabase key in the apikey header.
+  const apiKey = req.headers.get("apikey");
+  if (!apiKey) return reply(401, { error: "Missing API key" });
+
+  try {
+    const body = await req.json();
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const code = typeof body.code === "string" ? body.code.trim() : "";
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+        !/^\d{8}$/.test(code)) {
+      return reply(400, { error: "Enter a valid email and six-digit code." });
+    }
+
+    const url = Deno.env.get("SUPABASE_URL");
+    if (!url) return reply(500, { error: "Authentication is not configured." });
+
+    // Let Supabase Auth validate its own OTP and issue the real session.
+    const response = await fetch(`${url}/auth/v1/verify`, {
+      method: "POST",
+      headers: {
+        apikey: apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email,
+        token: code,
+        type: "magiclink",
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.access_token || !result.refresh_token) {
+      return reply(401, { error: "The code is invalid or expired. Request a new code." });
+    }
+
+    // These are session credentials intended for the authenticated client.
+    return reply(200, {
+      access_token: result.access_token,
+      refresh_token: result.refresh_token,
+      token_type: result.token_type,
+      expires_in: result.expires_in,
+      user: result.user,
+    });
+  } catch (error) {
+    console.error("verify-email-code failed:", error);
+    return reply(500, { error: "Could not verify the code." });
+  }
+});
+
+
+
+============================================================
+ DATABASE MIGRATIONS (LOCAL SQL FILES) 
+============================================================
+
+
+--- MIGRATION: 20261023181242_create_chat_tables.sql ---
+-- Create Profiles table
+create table public.profiles (
+  id uuid references auth.users on delete cascade not null primary key,
+  username text unique,
+  avatar_url text,
+  updated_at timestamp with time zone
+);
+
+-- Create Messages table
+create table public.messages (
+  id bigint generated by default as identity primary key,
+  sender_id uuid references public.profiles(id) on delete cascade not null,
+  content text not null,
+  is_image boolean default false,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Turn on Row Level Security (RLS)
+alter table public.profiles enable row level security;
+alter table public.messages enable row level security;
+
+-- Create policies
+create policy "Public profiles are viewable by everyone." on public.profiles for select using (true);
+create policy "Users can insert their own profile." on public.profiles for insert with check (auth.uid() = id);
+
+create policy "Messages are viewable by everyone." on public.messages for select using (true);
+create policy "Users can insert their own messages." on public.messages for insert with check (auth.uid() = sender_id);
+
+-- Enable Realtime for the messages table
+alter publication supabase_realtime add table public.messages;
+
+
+
+--- MIGRATION: 20261023223018_create_conversations.sql ---
+-- 1. Create a "conversations" table to group messages
+create table public.conversations (
+  id uuid default gen_random_uuid() primary key,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  user1_id uuid references public.profiles(id) not null,
+  user2_id uuid references public.profiles(id) not null,
+  last_message text,
+  last_message_time timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 2. Add a conversation_id and read status to the messages table
+alter table public.messages 
+  add column conversation_id uuid references public.conversations(id) on delete cascade,
+  add column is_read boolean default false;
+
+-- 3. Turn on RLS for conversations
+alter table public.conversations enable row level security;
+
+create policy "Users can view their own conversations."
+on public.conversations for select
+using (auth.uid() = user1_id or auth.uid() = user2_id);
+
+create policy "Users can insert conversations."
+on public.conversations for insert
+with check (auth.uid() = user1_id or auth.uid() = user2_id);
+
+create policy "Users can update their own conversations."
+on public.conversations for update
+using (auth.uid() = user1_id or auth.uid() = user2_id);
+
+-- 4. Enable Realtime for conversations
+alter publication supabase_realtime add table public.conversations;
+
+
+
+--- MIGRATION: 20261023223829_storage_policies.sql ---
+
+-- 1. Allow public read access to chat_media
+create policy "Public Access"
+on storage.objects for select
+using ( bucket_id = 'chat_media' );
+
+-- 2. Allow authenticated users to upload to chat_media
+create policy "Auth Upload"
+on storage.objects for insert
+with check (
+  bucket_id = 'chat_media' 
+  AND auth.role() = 'authenticated'
+);
+
+
+
+--- MIGRATION: 20261023224911_profile_search_policy.sql ---
+
+-- Allow all authenticated users to view all profiles (so they can be searched)
+create policy "Authenticated users can view all profiles"
+on public.profiles for select
+to authenticated
+using (true);
+
+-- Allow users to update their own profile
+create policy "Users can update their own profile"
+on public.profiles for update
+to authenticated
+using (auth.uid() = id);
+
+
+
+--- MIGRATION: 20261024073845_add_album_id.sql ---
+
+alter table public.messages add column album_id text;
+
+
+
+--- MIGRATION: 20261024083346_add_caption_column.sql ---
+
+alter table public.messages add column caption text;
+
+
+
+--- MIGRATION: 20261024090800_fix_read_receipts.sql ---
+
+-- Allow users to update messages in their conversations (mark as read)
+create policy "Users can update messages in their conversations"
+on public.messages for update
+using (
+  conversation_id in (
+    select id from public.conversations 
+    where user1_id = auth.uid() or user2_id = auth.uid()
+  )
+);
+
+
+
+--- MIGRATION: 20261024091548_fix_read_receipts.sql ---
+
+create policy "Users can update messages in their conversations"
+on public.messages for update
+using (
+  conversation_id in (
+    select id from public.conversations 
+    where user1_id = auth.uid() or user2_id = auth.uid()
+  )
+);
+
+
+
+--- MIGRATION: 20261024151011_create_calls_table.sql ---
+
+create table public.calls (
+  id uuid default gen_random_uuid() primary key,
+  caller_id uuid references public.profiles(id) not null,
+  receiver_id uuid references public.profiles(id) not null,
+  conversation_id uuid references public.conversations(id) not null,
+  status text default 'ringing' not null, -- 'ringing', 'active', 'ended'
+  offer jsonb,
+  answer jsonb,
+  caller_ice jsonb default '[]'::jsonb,
+  receiver_ice jsonb default '[]'::jsonb,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.calls enable row level security;
+
+create policy "Users can see calls involving them"
+on public.calls for select
+using (auth.uid() = caller_id or auth.uid() = receiver_id);
+
+create policy "Users can create calls"
+on public.calls for insert
+with check (auth.uid() = caller_id);
+
+create policy "Users can update calls they are part of"
+on public.calls for update
+using (auth.uid() = caller_id or auth.uid() = receiver_id);
+
+alter publication supabase_realtime add table public.calls;
+
+
+
+--- MIGRATION: 20261024151028_create_calls_table.sql ---
+
+create table public.calls (
+  id uuid default gen_random_uuid() primary key,
+  caller_id uuid references public.profiles(id) not null,
+  receiver_id uuid references public.profiles(id) not null,
+  conversation_id uuid references public.conversations(id) not null,
+  status text default 'ringing' not null, -- 'ringing', 'active', 'ended'
+  offer jsonb,
+  answer jsonb,
+  caller_ice jsonb default '[]'::jsonb,
+  receiver_ice jsonb default '[]'::jsonb,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.calls enable row level security;
+
+create policy "Users can see calls involving them"
+on public.calls for select
+using (auth.uid() = caller_id or auth.uid() = receiver_id);
+
+create policy "Users can create calls"
+on public.calls for insert
+with check (auth.uid() = caller_id);
+
+create policy "Users can update calls they are part of"
+on public.calls for update
+using (auth.uid() = caller_id or auth.uid() = receiver_id);
+
+alter publication supabase_realtime add table public.calls;
+
+
+
+--- MIGRATION: 20261024151511_create_analytics_table.sql ---
+
+create table public.analytics (
+  id uuid default gen_random_uuid() primary key,
+  event_type text not null,
+  metadata jsonb,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Allow public insert (for app tracking)
+alter table public.analytics enable row level security;
+create policy "Anyone can insert analytics" on public.analytics for insert with check (true);
+
+-- Allow only developers to read (You can change 'authenticated' to specific email if needed)
+create policy "Admins can read analytics" on public.analytics for select to authenticated using (true);
+
+
+
+--- MIGRATION: 20261024182942_cleanup_old_tables.sql ---
+
+-- Drop unused tables from the old login system
+drop table if exists public.otp_codes cascade;
+drop table if exists public.google_tokens cascade;
+drop table if exists public.google_oauth_credentials cascade;
+drop table if exists public.email_code_rate_limits cascade;
+
+-- Ensure the chat_media bucket is public (just in case)
+update storage.buckets set public = true where id = 'chat_media';
+
+
+
+--- MIGRATION: 20261024183053_safe_cleanup_and_fix.sql ---
+
+-- 1. Drop unused tables (cascade removes old policies)
+drop table if exists public.otp_codes cascade;
+drop table if exists public.google_tokens cascade;
+drop table if exists public.google_oauth_credentials cascade;
+drop table if exists public.email_code_rate_limits cascade;
+
+-- 2. Fix RLS policies for messages
+drop policy if exists "Users can update messages in their conversations" on public.messages;
+drop policy if exists "Users can insert their own messages." on public.messages;
+drop policy if exists "Messages are viewable by everyone." on public.messages;
+
+create policy "Messages are viewable by everyone" 
+on public.messages for select using (true);
+
+create policy "Users can insert their own messages" 
+on public.messages for insert 
+with check (auth.uid() = sender_id);
+
+create policy "Users can update messages in their conversations" 
+on public.messages for update
+using (
+  conversation_id in (
+    select id from public.conversations 
+    where user1_id = auth.uid() or user2_id = auth.uid()
+  )
+);
+
+-- 3. Fix RLS policies for calls
+drop policy if exists "Users can see calls involving them" on public.calls;
+drop policy if exists "Users can create calls" on public.calls;
+drop policy if exists "Users can update calls they are part of" on public.calls;
+
+create policy "Users can see calls involving them" 
+on public.calls for select 
+using (auth.uid() = caller_id or auth.uid() = receiver_id);
+
+create policy "Users can create calls" 
+on public.calls for insert 
+with check (auth.uid() = caller_id);
+
+create policy "Users can update calls they are part of" 
+on public.calls for update 
+using (auth.uid() = caller_id or auth.uid() = receiver_id);
+
+-- 4. Safely add tables to realtime (only if not already there)
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'calls') then
+    alter publication supabase_realtime add table public.calls;
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'analytics') then
+    alter publication supabase_realtime add table public.analytics;
+  end if;
+end $$;
+
+-- 5. Ensure chat_media bucket is public
+update storage.buckets set public = true where id = 'chat_media';
+
+
+
+--- MIGRATION: 20261024190614_restore_rate_limit_table.sql ---
+
+-- Re-create the table for rate limiting email codes
+create table if not exists public.email_code_rate_limits (
+  email text primary key,
+  last_sent_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  window_started_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  request_count integer default 1 not null
+);
+
+-- Enable RLS (Row Level Security)
+alter table public.email_code_rate_limits enable row level security;
+
+-- The Edge Function uses the Service Role key, which bypasses RLS by default.
+-- So we only need to ensure the table exists for the function to use.
+
+
+
+--- MIGRATION: 20261024190739_restore_google_credentials.sql ---
+
+-- Re-create the table to store the Gmail Refresh Token
+create table if not exists public.google_oauth_credentials (
+  id text primary key,
+  refresh_token text not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Enable RLS
+alter table public.google_oauth_credentials enable row level security;
+
+-- The Edge Function uses the Service Role key which bypasses RLS, 
+-- but we will keep it safe from public access.
+create policy "Only service role can access credentials"
+on public.google_oauth_credentials
+using (false)
+with check (false);
+
+
+
+============================================================
+ EDGE FUNCTION SECRETS (NAMES ONLY) 
+============================================================
+- SUPABASE_URL
+- SUPABASE_ANON_KEY
+- SUPABASE_SERVICE_ROLE_KEY
+- SUPABASE_PUBLISHABLE_KEYS
+- SUPABASE_SECRET_KEYS
+- SUPABASE_DB_URL
+- SUPABASE_JWKS
+- GOOGLE_CLIENT_ID
+- GOOGLE_CLIENT_SECRET
+- GROQ_API_KEY
+- GOOGLE_REDIRECT_URI

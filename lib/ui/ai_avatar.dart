@@ -37,17 +37,19 @@ class _AnimatedAIAvatarState extends State<AnimatedAIAvatar> with SingleTickerPr
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return CustomPaint(
-          size: Size(widget.size, widget.size),
-          painter: _AIAvatarPainter(
-            animationValue: _controller.value,
-            isThinking: widget.isThinking,
-          ),
-        );
-      },
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          return CustomPaint(
+            size: Size(widget.size, widget.size),
+            painter: _AIAvatarPainter(
+              animationValue: _controller.value,
+              isThinking: widget.isThinking,
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -134,6 +136,6 @@ class _AIAvatarPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _AIAvatarPainter oldDelegate) {
-    return true; // Must be true to rotate the rings, but we reduced the frame rate
+    return oldDelegate.animationValue != animationValue || oldDelegate.isThinking != isThinking;
   }
 }
