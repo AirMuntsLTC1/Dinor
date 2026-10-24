@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
+import 'dart:ui'; // Required for ImageFilter.blur
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -232,10 +233,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _showMessageMenu(BuildContext context, int index, Message msg) {
     _closeMessageMenu();
-    final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-    final RenderBox bubbleBox = context.findRenderObject() as RenderBox;
-    final Offset position = bubbleBox.localToGlobal(Offset.zero, ancestor: overlay);
-
+    // We don't need position anymore since we blur the background and show menu centered/anchored
     setState(() {
       _selectedMessage = msg;
       _selectedMessageIndex = index;
@@ -245,53 +243,67 @@ class _ChatScreenState extends State<ChatScreen> {
       builder: (context) {
         return Stack(
           children: [
+            // Blurred Background (covers whole screen)
             Positioned.fill(
               child: GestureDetector(
                 onTap: _closeMessageMenu,
-                behavior: HitTestBehavior.translucent,
-                child: const SizedBox.expand(),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                  child: Container(
+                    color: Colors.black.withValues(alpha: 0.1), // Slight tint
+                  ),
+                ),
               ),
             ),
+            // The menu itself
             Positioned(
-              top: position.dy - 50,
-              left: msg.isMe ? position.dx - 60 : position.dx,
+              top: MediaQuery.of(context).size.height * 0.5 - 40, // Center vertically
+              left: MediaQuery.of(context).size.width / 2 - 100, // Center horizontally
               child: TweenAnimationBuilder<double>(
                 tween: Tween(begin: 0.0, end: 1.0),
-                duration: const Duration(milliseconds: 150),
-                curve: Curves.easeOutBack,
+                duration: const Duration(milliseconds: 300), // Smooth like Telegram
+                curve: Curves.easeOutCubic,
                 builder: (context, val, child) {
                   return Transform.scale(
                     scale: val,
-                    alignment: msg.isMe ? Alignment.bottomRight : Alignment.bottomLeft,
-                    child: child,
+                    child: Opacity(
+                      opacity: val,
+                      child: child,
+                    ),
                   );
                 },
                 child: Material(
                   color: Colors.transparent,
                   child: Container(
-                    height: 40,
+                    height: 50,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     decoration: BoxDecoration(
                       color: DinorTheme.surfaceDark,
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: DinorTheme.softShadow,
+                      borderRadius: BorderRadius.circular(25),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.5),
+                          blurRadius: 20,
+                          spreadRadius: 5,
+                        ),
+                      ],
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
-                          icon: const Icon(Icons.arrow_forward, color: Colors.white70, size: 20),
+                          icon: const Icon(Icons.arrow_forward, color: Colors.white70, size: 22),
                           onPressed: _closeMessageMenu,
                         ),
                         IconButton(
-                          icon: const Icon(Icons.copy, color: Colors.white70, size: 20),
+                          icon: const Icon(Icons.copy, color: Colors.white70, size: 22),
                           onPressed: () {
                             Clipboard.setData(ClipboardData(text: msg.text));
                             _closeMessageMenu();
                           },
                         ),
                         IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
+                          icon: const Icon(Icons.delete, color: Colors.redAccent, size: 22),
                           onPressed: () {
                             _deleteMessage(msg);
                             _closeMessageMenu();
@@ -308,10 +320,7 @@ class _ChatScreenState extends State<ChatScreen> {
       },
     );
 
-    final overlayState = Overlay.of(context);
-    Future.delayed(const Duration(milliseconds: 50), () {
-      if (mounted && _menuOverlay != null) overlayState.insert(_menuOverlay!);
-    });
+    Overlay.of(context).insert(_menuOverlay!);
   }
 
   void _deleteMessage(Message msg) {
@@ -359,9 +368,6 @@ class _ChatScreenState extends State<ChatScreen> {
     return const SizedBox.shrink();
   }
 
-  // ---------------------------------------------------------------------------
-  // PERFECTED GRID: Handles 1, 2, 3, 4, and 4+ images.
-  // ---------------------------------------------------------------------------
   Widget _buildAlbumGrid(List<Message> images, bool isMe) {
     int count = images.length;
     const double gap = 2.0;
@@ -424,7 +430,6 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       );
     } else {
-      // 5 or more images: 2x2 grid with a +N overlay on the 4th slot
       return SizedBox(
         height: totalSize,
         child: Column(
@@ -508,17 +513,18 @@ class _ChatScreenState extends State<ChatScreen> {
             bottom: false,
             child: Padding(
               padding: const EdgeInsets.only(top: 8, left: 12, right: 12),
-              child: Container(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: DinorTheme.surfaceDark,
+                  color: _selectedMessage != null ? Colors.transparent : DinorTheme.surfaceDark,
                   borderRadius: BorderRadius.circular(30),
-                  boxShadow: DinorTheme.softShadow,
+                  boxShadow: _selectedMessage != null ? [] : DinorTheme.softShadow,
                 ),
                 child: Row(
                   children: [
                     AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 250),
+                      duration: const Duration(milliseconds: 300), // Smooth transition
                       transitionBuilder: (Widget child, Animation<double> animation) {
                         return RotationTransition(
                           turns: animation,
@@ -605,7 +611,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 if (msg.isImage && msg.albumId != null) {
                   final albumImages = _messages.where((m) => m.albumId == msg.albumId).toList();
                   if (albumImages.isNotEmpty && albumImages.first.id == msg.id) {
-                    // Find if the first image has a caption
                     String? albumCaption;
                     for (var i in albumImages) {
                       if (i.caption != null && i.caption!.isNotEmpty) {
@@ -633,6 +638,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             ),
                           );
                         },
+                        onLongPress: () => _showMessageMenu(context, index, msg),
                         child: Column(
                           crossAxisAlignment: msg.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                           children: [
@@ -645,7 +651,6 @@ class _ChatScreenState extends State<ChatScreen> {
                               ),
                               child: _buildAlbumGrid(albumImages, msg.isMe),
                             ),
-                            // Caption bubble under the album
                             if (albumCaption != null && albumCaption.isNotEmpty)
                               Container(
                                 margin: const EdgeInsets.only(bottom: 8),
@@ -670,7 +675,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 Widget messageBubble;
                 
                 if (msg.isImage) {
-                  // Raw Media (No Bubble Background)
                   messageBubble = Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     child: Column(
@@ -712,7 +716,6 @@ class _ChatScreenState extends State<ChatScreen> {
                             ],
                           ),
                         ),
-                        // Caption bubble under single image
                         if (msg.caption != null && msg.caption!.isNotEmpty)
                           Container(
                             margin: const EdgeInsets.only(top: 4),
@@ -728,7 +731,6 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   );
                 } else {
-                  // Text Message (With Bubble Background)
                   messageBubble = Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -828,7 +830,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
                                 if (selectedAssets.isEmpty) return;
 
-                                // 1. CACHE ALL FILES LOCALLY FIRST
                                 List<File> cachedFiles = [];
                                 for (var asset in selectedAssets) {
                                   final file = await asset.file;
@@ -848,7 +849,6 @@ class _ChatScreenState extends State<ChatScreen> {
                                     _triggerAiResponse(caption.isNotEmpty ? caption : "Examine this image.", imageBase64: base64String);
                                   }
                                 } else if (_currentUserId != null) {
-                                  // 2. SHOW ALL LOCAL IMAGES AT ONCE WITH SENDING DOTS
                                   List<Message> tempMessages = [];
                                   int cppTime = 0;
                                   try { cppTime = DinorCore.load().getFastTimestamp(); } catch (_) {}
@@ -870,7 +870,6 @@ class _ChatScreenState extends State<ChatScreen> {
                                   setState(() => _messages.addAll(tempMessages));
                                   _scrollToBottom();
 
-                                  // 3. UPLOAD ALL FILES SIMULTANEOUSLY IN BACKGROUND
                                   for (int i = 0; i < cachedFiles.length; i++) {
                                     final file = cachedFiles[i];
                                     final tempId = tempMessages[i].id;
@@ -991,7 +990,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                         });
                                         
                                         await supabase.from('conversations').update({
-                                          'last_message': 'Attach GIF',
+                                          'last_message': '🎬 GIF',
                                           'last_message_time': DateTime.now().toUtc().toIso8601String(),
                                         }).eq('id', widget.conversationId!);
                                       } catch (e) {
