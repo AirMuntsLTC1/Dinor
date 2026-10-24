@@ -36,8 +36,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Timer? _searchDebounce;
   int _fetchSeq = 0;   // drops out-of-order conversation responses
   int _searchSeq = 0;  // drops out-of-order search responses
-  bool _incomingDialogOpen = false;
-  BuildContext? _dialogContext;
   Timer? _homePoll;
 
   @override

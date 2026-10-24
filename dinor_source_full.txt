@@ -430,9 +430,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../chat/chat_service.dart';
-import '../chat/call_service.dart';
 import '../chat/message_cache.dart';
-import 'call_screen.dart';
 import 'skeleton_loader.dart';
 import 'chat_screen.dart';
 import 'ai_avatar.dart';
@@ -487,9 +485,6 @@ class _HomeScreenState extends State<HomeScreen> {
     // Fallback: refresh the chat list regularly, in case Realtime lags.
     _homePoll = Timer.periodic(const Duration(seconds: 6), (_) => _scheduleRefresh());
 
-    // 4. Calls addressed to this user.
-    CallService.startIncomingListener();
-    CallService.incoming.addListener(_onIncomingCall);
   }
 
   void _subscribeRealtime() {
@@ -515,7 +510,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _searchDebounce?.cancel();
     _homePoll?.cancel();
     _convChannel?.unsubscribe();
-    CallService.incoming.removeListener(_onIncomingCall);
     _searchFocus.dispose();
     super.dispose();
   }
@@ -597,58 +591,6 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (context) => ChatScreen(title: name, conversationId: convId, otherUserId: otherUserId),
       ),
     ).then((_) => _scheduleRefresh());
-  }
-
-  void _onIncomingCall() {
-    final call = CallService.incoming.value;
-    if (!mounted) return;
-
-    if (call == null) {
-      // Caller hung up, or the call was answered elsewhere: close the prompt.
-      if (_incomingDialogOpen && _dialogContext != null) {
-        try {
-          Navigator.of(_dialogContext!).pop(); // null result: no decline sent
-        } catch (_) {}
-      }
-      return;
-    }
-    if (_incomingDialogOpen) return;
-    _incomingDialogOpen = true;
-
-    showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        _dialogContext = ctx;
-        return AlertDialog(
-          backgroundColor: DinorTheme.surfaceDark,
-          title: const Text('Incoming call', style: TextStyle(color: Colors.white)),
-          content: Text('${call.callerName} is calling you', style: const TextStyle(color: DinorTheme.textGrey)),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Decline', style: TextStyle(color: Colors.redAccent))),
-            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Answer', style: TextStyle(color: DinorTheme.brandBlue))),
-          ],
-        );
-      },
-    ).then((accepted) {
-      _incomingDialogOpen = false;
-      _dialogContext = null;
-      if (accepted == true && mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => CallScreen(
-              receiverName: call.callerName,
-              receiverId: call.callerId,
-              conversationId: call.conversationId,
-              incomingCallId: call.callId,
-            ),
-          ),
-        );
-      } else if (accepted == false) {
-        CallService.declineCall(call.callId);
-      }
-    });
   }
 
   @override
@@ -844,14 +786,12 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../ffi/dinor_bindings.dart';
 import '../chat/ai_service.dart';
 import '../chat/message_cache.dart';
-import '../chat/call_service.dart';
 import '../chat/chat_service.dart';
 import 'ai_avatar.dart';
 import 'media_picker.dart';
 import 'emoji_picker.dart';
 import 'media_viewer.dart';
 import 'dinor_theme.dart';
-import 'call_screen.dart';
 import 'skeleton_loader.dart';
 
 enum MessageStatus { sending, sent, failed }
@@ -960,7 +900,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _subscribeRealtime(convId);
     // Fallback: check for new messages every few seconds, in case Realtime lags.
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _pollNewMessages());
+    _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _pollNewMessages());
     await _fetchMessages();
     ChatService.markAsRead(convId);
   }
@@ -969,7 +909,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void _subscribeRealtime(String convId) {
     _chatChannel?.unsubscribe();
     _chatChannel = supabase.channel('chat:$convId').onPostgresChanges(
-      event: PostgresChangeEvent.insert,
+      event: PostgresChangeEvent.all,
       schema: 'public',
       table: 'messages',
       filter: PostgresChangeFilter(
@@ -978,7 +918,19 @@ class _ChatScreenState extends State<ChatScreen> {
         value: convId,
       ),
       callback: (payload) {
-        if (mounted) _ingest(payload.newRecord);
+        if (payload.eventType == PostgresChangeEvent.insert) {
+          if (mounted) _ingest(payload.newRecord);
+        } else if (payload.eventType == PostgresChangeEvent.update) {
+          if (mounted) {
+            final updated = payload.newRecord;
+            final idx = _messages.indexWhere((m) => m.id == updated['id'].toString());
+            if (idx != -1) {
+              setState(() {
+                _messages[idx] = _rowToMessage(updated);
+              });
+            }
+          }
+        }
       },
     ).subscribe();
   }
@@ -1270,14 +1222,17 @@ class _ChatScreenState extends State<ChatScreen> {
                     maxScale: 4.0,
                     child: Center(
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(24), // Smooth iOS rounded corners
-                        child: CachedNetworkImage(
-                          imageUrl: img.text,
-                          width: double.infinity,
-                          fit: BoxFit.contain,
-                          memCacheWidth: 1000, 
-                          placeholder: (c, u) => const Center(child: CircularProgressIndicator(color: Colors.white)),
-                          errorWidget: (c, u, e) => const Icon(Icons.broken_image, color: Colors.white),
+                        borderRadius: BorderRadius.circular(24),
+                        child: Container(
+                          color: Colors.black26,
+                          child: CachedNetworkImage(
+                            imageUrl: img.text,
+                            width: double.infinity,
+                            fit: BoxFit.contain,
+                            memCacheWidth: 1000, 
+                            placeholder: (c, u) => const Center(child: CircularProgressIndicator(color: Colors.white)),
+                            errorWidget: (c, u, e) => const Icon(Icons.broken_image, color: Colors.white),
+                          ),
                         ),
                       ),
                     ),
@@ -1710,40 +1665,6 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
                     ),
                     
-                    // Call Icon
-                    if (!widget.isAi && widget.otherUserId != null && _selectedMessage == null)
-                      IconButton(
-                        icon: const Icon(Icons.call, color: Colors.white, size: 22),
-                        onPressed: () {
-                          if (_resolvedConversationId != null && widget.otherUserId != null) {
-                            if (CallService.phase.value != CallPhase.idle) return;
-                            Navigator.push(
-                              context,
-                              PageRouteBuilder(
-                                pageBuilder: (context, animation, secondaryAnimation) => CallScreen(
-                                  receiverName: widget.title,
-                                  receiverId: widget.otherUserId,
-                                  conversationId: _resolvedConversationId!,
-                                ),
-                                transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                                  return FadeTransition(
-                                    opacity: animation,
-                                    child: ScaleTransition(
-                                      scale: Tween<double>(begin: 0.9, end: 1.0).animate(
-                                        CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-                                      ),
-                                      child: child,
-                                    ),
-                                  );
-                                },
-                                transitionDuration: const Duration(milliseconds: 400),
-                              ),
-                            );
-                          }
-                        },
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                      ),
                   ],
                 ),
               ),
@@ -1905,9 +1826,13 @@ class _ChatScreenState extends State<ChatScreen> {
                                 if (selectedAssets.isEmpty) return;
 
                                 List<File> cachedFiles = [];
+                                List<bool> isVideoList = [];
                                 for (var asset in selectedAssets) {
                                   final file = await asset.file;
-                                  if (file != null) cachedFiles.add(file);
+                                  if (file != null) {
+                                    cachedFiles.add(file);
+                                    isVideoList.add(asset.type == AssetType.video);
+                                  }
                                 }
 
                                 if (cachedFiles.isEmpty) return;
@@ -1947,9 +1872,11 @@ class _ChatScreenState extends State<ChatScreen> {
                                   for (int i = 0; i < cachedFiles.length; i++) {
                                     final file = cachedFiles[i];
                                     final tempId = tempMessages[i].id;
+                                    final isVideo = isVideoList[i];
 
                                     try {
-                                      final fileName = '${DateTime.now().millisecondsSinceEpoch}_${i}_$_currentUserId.jpg';
+                                      final ext = isVideo ? 'mp4' : 'jpg';
+                                      final fileName = '${DateTime.now().millisecondsSinceEpoch}_${i}_$_currentUserId.$ext';
                                       await supabase.storage.from('chat_media').upload(fileName, file);
                                       final publicUrl = supabase.storage.from('chat_media').getPublicUrl(fileName);
 
@@ -1996,7 +1923,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                   }
 
                                   await supabase.from('conversations').update({
-                                    'last_message': '📷 ${cachedFiles.length} Photos',
+                                    'last_message': '📷 ${cachedFiles.length} Media',
                                     'last_message_time': DateTime.now().toUtc().toIso8601String(),
                                   }).eq('id', _resolvedConversationId!);
                                 }
@@ -2360,12 +2287,12 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
     final PermissionStatus status = await Permission.photos.request();
     final PermissionStatus videoStatus = await Permission.videos.request();
 
-    if (status.isGranted || videoStatus.isGranted) {
+    if (status.isGranted || videoStatus.isGranted || await Permission.storage.isGranted) {
       setState(() => _hasPermission = true);
       
       // Load directly (Isolate doesn't support photo_manager natively)
       final paths = await PhotoManager.getAssetPathList(
-        type: RequestType.common,
+        type: RequestType.all,
         onlyAll: true,
       );
       
@@ -3755,7 +3682,6 @@ FILE: lib/ui/profile_screen.dart
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../chat/call_service.dart';
 import '../chat/message_cache.dart';
 import 'dinor_theme.dart';
 
@@ -3779,7 +3705,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _signOut() async {
     // Stop per-user listeners and wipe local data before signing out,
     // so the next account on this device never sees the previous user's cache.
-    CallService.stopIncomingListener();
     await LocalCache.clearAll();
     await supabase.auth.signOut();
     // The AuthGate in main.dart will automatically redirect to LoginScreen
@@ -4243,300 +4168,6 @@ class MessageSkeleton extends StatelessWidget {
 
 
 ============================================================
-FILE: lib/ui/call_screen.dart
-============================================================
-
-import 'dart:async';
-
-import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-
-import '../chat/call_service.dart';
-
-/// Full-screen audio call. Reflects real WebRTC state from [CallService].
-///
-/// Pass [incomingCallId] when answering a call that someone else started.
-class CallScreen extends StatefulWidget {
-  final String receiverName;
-  final String? receiverId;
-  final String conversationId;
-  final String? incomingCallId;
-
-  const CallScreen({
-    super.key,
-    required this.receiverName,
-    required this.receiverId,
-    required this.conversationId,
-    this.incomingCallId,
-  });
-
-  @override
-  State<CallScreen> createState() => _CallScreenState();
-}
-
-class _CallScreenState extends State<CallScreen> {
-  Timer? _ticker;
-  int _secondsElapsed = 0;
-  bool _started = false;
-  bool _closing = false;
-  bool get _isIncoming => widget.incomingCallId != null;
-
-  @override
-  void initState() {
-    super.initState();
-    CallService.phase.addListener(_onPhaseChanged);
-    CallService.connectedAtMs.addListener(_onConnectedChanged);
-    _start();
-  }
-
-  Future<void> _start() async {
-    _started = true;
-    if (_isIncoming) {
-      await CallService.acceptCall(widget.incomingCallId!);
-    } else if (widget.receiverId != null) {
-      await CallService.startCall(widget.receiverId!, widget.conversationId);
-    }
-    // If the service never left idle (e.g. call already in progress), close.
-    if (mounted && CallService.phase.value == CallPhase.idle && CallService.lastEndReason == 'failed') {
-      _finish();
-    }
-  }
-
-  void _onConnectedChanged() {
-    if (CallService.connectedAtMs.value != null && _ticker == null && mounted) {
-      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (!mounted) return;
-        final start = CallService.connectedAtMs.value;
-        if (start == null) return;
-        setState(() {
-          _secondsElapsed = (DateTime.now().millisecondsSinceEpoch - start) ~/ 1000;
-        });
-      });
-    }
-  }
-
-  void _onPhaseChanged() {
-    if (!mounted) return;
-    setState(() {});
-    // Phase returns to idle when the call is over (ended, declined, missed, failed).
-    if (_started && CallService.phase.value == CallPhase.idle) {
-      _finish();
-    }
-  }
-
-  Future<void> _finish() async {
-    if (_closing) return;
-    _closing = true;
-    _ticker?.cancel();
-    CallService.phase.removeListener(_onPhaseChanged);
-    CallService.connectedAtMs.removeListener(_onConnectedChanged);
-
-    await _logCallIfNeeded();
-
-    if (mounted) {
-      // Brief pause so the user sees "Call ended" / "No answer".
-      // Failures stay on screen long enough to read the reason.
-      final failed = CallService.lastEndReason == 'failed';
-      await Future.delayed(Duration(milliseconds: failed ? 6000 : 700));
-      if (mounted) Navigator.of(context).pop();
-    }
-  }
-
-  /// Only the caller writes the call log, so each call produces one entry.
-  Future<void> _logCallIfNeeded() async {
-    if (_isIncoming) return;
-    final reason = CallService.lastEndReason;
-    final connectedAt = CallService.connectedAtMs.value;
-    final wasConnected = _secondsElapsed > 0 || connectedAt != null;
-    final supabase = Supabase.instance.client;
-    final userId = supabase.auth.currentUser?.id;
-    if (userId == null) return;
-
-    String? text;
-    if (wasConnected) {
-      text = '📞 Outgoing call (Duration: ${_formatTime(_secondsElapsed)})';
-    } else if (reason == 'missed' || reason == 'declined') {
-      text = reason == 'declined' ? '📞 Call declined' : '📞 Missed call';
-    }
-    if (text == null) return;
-
-    try {
-      await supabase.from('messages').insert({
-        'sender_id': userId,
-        'content': text,
-        'is_image': false,
-        'conversation_id': widget.conversationId,
-        'is_read': true,
-      });
-      await supabase.from('conversations').update({
-        'last_message': text,
-        'last_message_time': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', widget.conversationId);
-    } catch (e) {
-      debugPrint('Failed to log call: $e');
-    }
-  }
-
-  String _formatTime(int seconds) {
-    final minutes = (seconds ~/ 60).toString().padLeft(2, '0');
-    final secs = (seconds % 60).toString().padLeft(2, '0');
-    return '$minutes:$secs';
-  }
-
-  String _statusText(CallPhase phase, bool closing) {
-    if (closing) {
-      switch (CallService.lastEndReason) {
-        case 'declined': return 'Call declined';
-        case 'missed': return 'No answer';
-        case 'failed': return 'Call failed';
-        default: return 'Call ended';
-      }
-    }
-    switch (phase) {
-      case CallPhase.calling: return 'Calling…';
-      case CallPhase.connecting: return 'Connecting…';
-      case CallPhase.connected: return _formatTime(_secondsElapsed);
-      case CallPhase.idle: return _isIncoming ? 'Connecting…' : 'Calling…';
-    }
-  }
-
-  Future<void> _endPressed() async {
-    await CallService.endCall(reason: 'ended');
-    // endCall returns to idle, which triggers _finish via the listener.
-  }
-
-@override
-  void dispose() {
-    _ticker?.cancel();
-    CallService.phase.removeListener(_onPhaseChanged);
-    CallService.connectedAtMs.removeListener(_onConnectedChanged);
-    CallService.endCall(reason: 'ended');
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final phase = CallService.phase.value;
-    final connected = phase == CallPhase.connected;
-    final name = widget.receiverName;
-
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFFF80AB), Color(0xFFC51162)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              const SizedBox(height: 40),
-              Text(
-                _statusText(phase, _closing),
-                style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w300, letterSpacing: 2),
-              ),
-              const SizedBox(height: 60),
-              Container(
-                width: 160,
-                height: 160,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 4),
-                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 30, spreadRadius: 10)],
-                ),
-                child: Center(
-                  child: Text(
-                    name.isNotEmpty ? name[0].toUpperCase() : '?',
-                    style: const TextStyle(color: Colors.white, fontSize: 64, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 40),
-              Text(name, style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
-              if (_closing && CallService.lastErrorMessage != null)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  child: Text(
-                    CallService.lastErrorMessage!,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white, fontSize: 14),
-                  ),
-                ),
-              const Spacer(),
-              if (!connected && !_closing) const AnimatedCallingDots(),
-              const Spacer(),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 50),
-                child: GestureDetector(
-                  onTap: _closing ? null : _endPressed,
-                  child: Container(
-                    width: 70,
-                    height: 70,
-                    decoration: const BoxDecoration(color: Colors.redAccent, shape: BoxShape.circle),
-                    child: const Icon(Icons.call_end, color: Colors.white, size: 32),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class AnimatedCallingDots extends StatefulWidget {
-  const AnimatedCallingDots({super.key});
-
-  @override
-  State<AnimatedCallingDots> createState() => _AnimatedCallingDotsState();
-}
-
-class _AnimatedCallingDotsState extends State<AnimatedCallingDots> with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        final t = _controller.value;
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(3, (index) {
-            double progress = (t - index * 0.2) % 1.0;
-            if (progress < 0) progress += 1.0;
-            final scale = 1.0 + (0.8 * (progress < 0.5 ? progress * 2 : (1 - progress) * 2));
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Transform.scale(
-                scale: scale,
-                child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
-              ),
-            );
-          }),
-        );
-      },
-    );
-  }
-}
-
-
-============================================================
 FILE: lib/chat/ai_service.dart
 ============================================================
 
@@ -4674,660 +4305,6 @@ class ChatService {
         .eq('conversation_id', conversationId)
         .neq('sender_id', me)
         .eq('is_read', false);
-  }
-}
-
-
-============================================================
-FILE: lib/chat/call_service.dart
-============================================================
-
-import 'dart:async';
-
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-
-/// Lifecycle of the one active call on this device.
-enum CallPhase { idle, calling, connecting, connected }
-
-class IncomingCall {
-  final String callId;
-  final String callerId;
-  final String conversationId;
-  final String callerName;
-  const IncomingCall({
-    required this.callId,
-    required this.callerId,
-    required this.conversationId,
-    required this.callerName,
-  });
-}
-
-/// WebRTC audio calls signaled through the `calls` table.
-///
-/// * Incoming calls ring (native ringtone + vibration) and show a prompt.
-/// * The prompt closes if the caller hangs up before it is answered.
-/// * The answerer waits for the caller's offer instead of failing on a race.
-/// * Hang-up releases the microphone at once (peer closed, tracks stopped).
-class CallService {
-  CallService._();
-
-  static SupabaseClient get _db => Supabase.instance.client;
-
-/// How long to ring before giving up (caller side, callee never answered).
-  static const Duration _ringTimeout = Duration(seconds: 45);
-
-  /// After the callee answers, how long to wait for WebRTC to reach 'connected'
-  /// before declaring failure. Covers "answered but network broken".
-  static const Duration _connectTimeout = Duration(seconds: 15);
-
-  /// If the peer disconnects mid-call (network blip), how long to hold on
-  /// before ending. Messenger/WhatsApp give ~8s of grace.
-  static const Duration _reconnectGrace = Duration(seconds: 8);
-
-  /// Hard safety cap: stop the ringtone if 'stop' was never called
-  /// (app crash, process kill, exception in the stop path).
-  static const Duration _ringSafetyTimeout = Duration(seconds: 60);
-
-  /// Incoming ring expires after this even if the Realtime 'ended' update
-  /// never arrives (network glitch on the DB update).
-  static const Duration _incomingExpiry = Duration(seconds: 30);
-  static const MethodChannel _ringChannel = MethodChannel('dinor/ring');
-  static const Map<String, dynamic> _rtcConfig = {
-    'iceServers': [
-      {'urls': 'stun:stun.l.google.com:19302'},
-    ],
-  };
-
-  // Observed by the UI.
-  static final ValueNotifier<CallPhase> phase = ValueNotifier(CallPhase.idle);
-  static final ValueNotifier<int?> connectedAtMs = ValueNotifier(null);
-  static final ValueNotifier<IncomingCall?> incoming = ValueNotifier(null);
-
-  /// Why the last call ended: 'ended', 'missed', 'declined', 'failed', or null.
-  static String? lastEndReason;
-
-  /// Human-readable reason for the last failure (shown on the call screen).
-  static String? lastErrorMessage;
-
-  static RTCPeerConnection? _pc;
-  static MediaStream? _localStream;
-  static RealtimeChannel? _callChannel;
-  static RealtimeChannel? _incomingChannel;
-  static String? _callId;
-  static bool _isCaller = false;
-
-  static bool _remoteDescSet = false;
-  static bool _answerApplied = false;
-  static int _remoteIceApplied = 0;
-  static final List<RTCIceCandidate> _pendingRemoteIce = [];
-
-  static Future<void> _iceWriteChain = Future.value();
-  static Timer? _ringTimer;
-static Timer? _connectTimer;
-  static Timer? _reconnectTimer;
-  static Timer? _ringSafetyTimer;
-  static Timer? _incomingExpiryTimer;
-  static Timer? _callPoll;
-  static Timer? _incomingPoll;
-  static final Set<String> _seenCallIds = {};
-
-  static String? get currentCallId => _callId;
-
-  // ---------------------------------------------------------------------------
-  // Ringing (native ringtone + vibration; silently skipped where unavailable)
-  // ---------------------------------------------------------------------------
-
-static Future<void> _ring(bool on) async {
-    try {
-      await _ringChannel.invokeMethod(on ? 'start' : 'stop');
-    } catch (_) {
-      // Not available on this platform: the on-screen prompt still shows.
-    }
-    // Safety: if 'stop' never arrives (crash, exception), force-stop.
-    if (on) {
-      _ringSafetyTimer?.cancel();
-      _ringSafetyTimer = Timer(_ringSafetyTimeout, () {
-        try { _ringChannel.invokeMethod('stop'); } catch (_) {}
-      });
-    } else {
-      _ringSafetyTimer?.cancel();
-      _ringSafetyTimer = null;
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Incoming calls
-  // ---------------------------------------------------------------------------
-
-  /// Listens for calls addressed to this user. Call after login.
-  static void startIncomingListener() {
-    final me = _db.auth.currentUser?.id;
-    if (me == null) return;
-    _incomingChannel?.unsubscribe();
-    final filter = PostgresChangeFilter(
-      type: PostgresChangeFilterType.eq,
-      column: 'receiver_id',
-      value: me,
-    );
-    _incomingChannel = _db
-        .channel('incoming_calls:$me')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'calls',
-          filter: filter,
-          callback: (payload) => _onIncomingRow(payload.newRecord),
-        )
-        .onPostgresChanges(
-          event: PostgresChangeEvent.update,
-          schema: 'public',
-          table: 'calls',
-          filter: filter,
-          callback: (payload) => _onIncomingUpdate(payload.newRecord),
-        )
-        .subscribe();
-
-    // Fallback: check for calls directly, so ringing works even if Realtime lags.
-    _incomingPoll?.cancel();
-    _incomingPoll = Timer.periodic(const Duration(seconds: 3), (_) => _pollIncoming());
-  }
-
-  static void stopIncomingListener() {
-    _incomingChannel?.unsubscribe();
-    _incomingChannel = null;
-    _incomingPoll?.cancel();
-    _incomingPoll = null;
-    _clearIncoming();
-  }
-
-  /// Polling fallback for incoming calls and cancellations.
-  static Future<void> _pollIncoming() async {
-    final me = _db.auth.currentUser?.id;
-    if (me == null) return;
-    try {
-      final current = incoming.value;
-      if (current != null) {
-        final row = await _db.from('calls').select('status').eq('id', current.callId).maybeSingle();
-        if (row == null || row['status'] != 'ringing') _clearIncoming();
-        return;
-      }
-      if (phase.value != CallPhase.idle) return;
-      final since = DateTime.now().toUtc().subtract(const Duration(seconds: 60)).toIso8601String();
-      final rows = await _db
-          .from('calls')
-          .select()
-          .eq('receiver_id', me)
-          .eq('status', 'ringing')
-          .gt('created_at', since)
-          .order('created_at', ascending: false)
-          .limit(1);
-      for (final r in List<Map<String, dynamic>>.from(rows)) {
-        await _onIncomingRow(r);
-      }
-    } catch (e) {
-      debugPrint('incoming poll: $e');
-    }
-  }
-
-  /// Polling fallback for an active call: keeps signaling moving without Realtime.
-  static void _startCallPoll() {
-    _callPoll?.cancel();
-    _callPoll = Timer.periodic(const Duration(seconds: 2), (_) => _pollCall());
-  }
-
-  static Future<void> _pollCall() async {
-    final id = _callId;
-    if (id == null) return;
-    try {
-      final row = await _db.from('calls').select().eq('id', id).maybeSingle();
-      if (row != null && id == _callId) await _applyRow(row);
-    } catch (e) {
-      debugPrint('call poll: $e');
-    }
-  }
-
-  static void _clearIncoming() {
-    incoming.value = null;
-    _ring(false);
-  }
-
-static void _armIncomingExpiry(String callId) {
-    _incomingExpiryTimer?.cancel();
-    _incomingExpiryTimer = Timer(_incomingExpiry, () {
-      final current = incoming.value;
-      if (current != null && current.callId == callId) {
-        _clearIncoming();
-        _declineRow(callId);
-      }
-    });
-  }
-
-  static Future<void> _onIncomingRow(Map<String, dynamic> row) async {
-    if (row['status'] != 'ringing') return;
-    // Realtime and polling can both report the same call: handle it once.
-    if (!_seenCallIds.add(row['id'].toString())) return;
-    if (phase.value != CallPhase.idle) {
-      // Already on a call: decline so the caller does not ring forever.
-      await _declineRow(row['id'].toString());
-      return;
-    }
-    _ring(true);
-
-    String name = 'Unknown';
-    try {
-      final profile = await _db
-          .from('profiles')
-          .select('username')
-          .eq('id', row['caller_id'])
-          .maybeSingle();
-      name = (profile?['username'] as String?) ?? name;
-    } catch (_) {}
-
-    // The caller may have hung up while we looked up the name.
-    if (phase.value != CallPhase.idle) return;
-    incoming.value = IncomingCall(
-      callId: row['id'].toString(),
-      callerId: row['caller_id'].toString(),
-      conversationId: row['conversation_id'].toString(),
-      callerName: name,
-    );
-    _armIncomingExpiry(row['id'].toString());
-  }
-
-  /// Closes the prompt when the caller cancels or the call is answered elsewhere.
-  static void _onIncomingUpdate(Map<String, dynamic> row) {
-    final current = incoming.value;
-    if (current == null || current.callId != row['id'].toString()) return;
-    if (row['status'] != 'ringing') _clearIncoming();
-  }
-
-  static Future<void> declineCall(String callId) async {
-    _clearIncoming();
-    await _declineRow(callId);
-  }
-
-  static Future<void> _declineRow(String callId) async {
-    try {
-      await _db.from('calls').update({'status': 'declined'}).eq('id', callId);
-    } catch (_) {}
-  }
-
-  // ---------------------------------------------------------------------------
-  // Caller
-  // ---------------------------------------------------------------------------
-
-  static Future<void> startCall(String receiverId, String conversationId) async {
-    if (phase.value != CallPhase.idle) return;
-    final me = _db.auth.currentUser!.id;
-    _isCaller = true;
-    lastErrorMessage = null;
-    lastEndReason = null;
-    phase.value = CallPhase.calling;
-
-    try {
-      final row = await _db.from('calls').insert({
-        'caller_id': me,
-        'receiver_id': receiverId,
-        'conversation_id': conversationId,
-        'status': 'ringing',
-      }).select('id').single();
-      _callId = row['id'].toString();
-
-      await _openMedia();
-      await _createPeer();
-
-      final offer = await _pc!.createOffer({'offerToReceiveAudio': 1});
-      await _pc!.setLocalDescription(offer);
-      await _db.from('calls').update({
-        'offer': {'sdp': offer.sdp, 'type': offer.type},
-      }).eq('id', _callId!);
-
-// If the callee answers but WebRTC never connects (NAT/firewall),
-      // fail fast instead of leaving the user staring at "Connecting...".
-      _connectTimer?.cancel();
-      _connectTimer = Timer(_connectTimeout, () {
-        if (phase.value == CallPhase.calling || phase.value == CallPhase.connecting) {
-          lastErrorMessage = 'Could not connect. Your network may block direct calls.';
-          endCall(reason: 'failed');
-        }
-      });
-
-      // Total ring cap: if the callee never answers, end it.
-      _subscribe();
-      _startCallPoll();
-      final current = await _db.from('calls').select().eq('id', _callId!).single();
-      await _applyRow(current);
-
-      _ringTimer = Timer(_ringTimeout, () {
-        if (phase.value == CallPhase.calling) endCall(reason: 'missed');
-      });
-    } catch (e) {
-      debugPrint('startCall failed: $e');
-      lastErrorMessage = _friendly(e);
-      final id = _callId;
-      if (id != null) {
-        try {
-          await _db.from('calls').update({'status': 'ended'}).eq('id', id);
-        } catch (_) {}
-      }
-      await _fail();
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Receiver
-  // ---------------------------------------------------------------------------
-
-  static Future<void> acceptCall(String callId) async {
-    _clearIncoming(); // ALWAYS stop the ringtone first
-    if (phase.value != CallPhase.idle) return;
-    _isCaller = false;
-    _callId = callId;
-    lastErrorMessage = null;
-    lastEndReason = null;
-    phase.value = CallPhase.connecting;
-
-    try {
-      var row = await _db.from('calls').select().eq('id', callId).single();
-
-      for (var i = 0; row['offer'] == null && i < 30; i++) {
-        if (row['status'] == 'ended' || row['status'] == 'declined') {
-          throw StateError('The caller hung up.');
-        }
-        await Future.delayed(const Duration(milliseconds: 500));
-        row = await _db.from('calls').select().eq('id', callId).single();
-      }
-      final offer = row['offer'];
-      if (offer == null) throw StateError('The call did not start. Ask them to call again.');
-
-      await _openMedia();
-      await _createPeer();
-
-      await _pc!.setRemoteDescription(
-        RTCSessionDescription(offer['sdp'] as String, offer['type'] as String),
-      );
-      _remoteDescSet = true;
-      await _flushPendingIce();
-
-      final answer = await _pc!.createAnswer({'offerToReceiveAudio': 1});
-      await _pc!.setLocalDescription(answer);
-      await _db.from('calls').update({
-        'answer': {'sdp': answer.sdp, 'type': answer.type},
-        'status': 'active',
-      }).eq('id', callId);
-
-      _subscribe();
-      _startCallPoll();
-      await _applyRow(row);
-    } catch (e) {
-      debugPrint('acceptCall failed: $e');
-      lastErrorMessage = _friendly(e);
-      try {
-        await _db.from('calls').update({'status': 'ended'}).eq('id', callId);
-      } catch (_) {}
-      await _fail();
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Shared plumbing
-  // ---------------------------------------------------------------------------
-
-  static Future<void> _openMedia() async {
-    final mic = await Permission.microphone.request();
-    if (!mic.isGranted) {
-      throw StateError('Microphone permission is off. Allow it for Dinor in Android Settings.');
-    }
-    try {
-      if (!await Permission.bluetoothConnect.isGranted) {
-        await Permission.bluetoothConnect.request();
-      }
-    } catch (_) {}
-    _localStream = await navigator.mediaDevices.getUserMedia({'audio': true, 'video': false});
-  }
-
-  static Future<void> _createPeer() async {
-    final pc = await createPeerConnection(_rtcConfig);
-    _pc = pc;
-
-    for (final track in _localStream?.getAudioTracks() ?? const <MediaStreamTrack>[]) {
-      await pc.addTrack(track, _localStream!);
-    }
-
-    pc.onIceCandidate = (candidate) {
-      if (candidate.candidate == null) return;
-      _queueIce({
-        'candidate': candidate.candidate,
-        'sdpMid': candidate.sdpMid,
-        'sdpMLineIndex': candidate.sdpMLineIndex,
-      });
-    };
-
-pc.onConnectionState = (state) {
-      switch (state) {
-        case RTCPeerConnectionState.RTCPeerConnectionStateConnected:
-          _ringTimer?.cancel();
-          _connectTimer?.cancel();
-          _connectTimer = null;
-          _onPeerReconnected();
-          phase.value = CallPhase.connected;
-          connectedAtMs.value ??= DateTime.now().millisecondsSinceEpoch;
-          break;
-        case RTCPeerConnectionState.RTCPeerConnectionStateDisconnected:
-          // Temporary blip: give the network a grace window to recover.
-          _onPeerDisconnected();
-          break;
-        case RTCPeerConnectionState.RTCPeerConnectionStateFailed:
-          _connectTimer?.cancel();
-          lastErrorMessage = 'Could not connect to the other phone. Your network may block direct calls.';
-          _fail();
-          break;
-        case RTCPeerConnectionState.RTCPeerConnectionStateClosed:
-          if (phase.value != CallPhase.idle) endCall(reason: 'ended');
-          break;
-        default:
-          break;
-      }
-    };
-  }
-
-  /// Serializes ICE writes so concurrent candidates are never lost.
-  static void _queueIce(Map<String, dynamic> candidate) {
-    _iceWriteChain = _iceWriteChain.then((_) async {
-      final id = _callId;
-      if (id == null) return;
-      final column = _isCaller ? 'caller_ice' : 'receiver_ice';
-      try {
-        final current = await _db.from('calls').select(column).eq('id', id).single();
-        final list = List<dynamic>.from((current[column] as List?) ?? const []);
-        list.add(candidate);
-        await _db.from('calls').update({column: list}).eq('id', id);
-      } catch (e) {
-        debugPrint('ICE write failed: $e');
-      }
-    });
-  }
-
-/// Tracks disconnection grace. Called from onConnectionState.
-  static void _onPeerDisconnected() {
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(_reconnectGrace, () {
-      if (phase.value != CallPhase.idle) {
-        lastErrorMessage = 'Connection lost.';
-        endCall(reason: 'failed');
-      }
-    });
-  }
-
-  static void _onPeerReconnected() {
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
-  }
-
-  static void _subscribe() {
-    final id = _callId;
-    if (id == null) return;
-    _callChannel?.unsubscribe();
-    _callChannel = _db
-        .channel('call:$id')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.update,
-          schema: 'public',
-          table: 'calls',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'id',
-            value: id,
-          ),
-          callback: (payload) => _applyRow(payload.newRecord),
-        )
-        .subscribe();
-  }
-
-  /// Applies remote signaling from a call row. Safe to call repeatedly.
-  static Future<void> _applyRow(Map<String, dynamic> row) async {
-    final pc = _pc;
-    if (pc == null) return;
-
-    final status = row['status'];
-    if (status == 'ended' || status == 'declined') {
-      await endCall(reason: status as String, notifyRemote: false);
-      return;
-    }
-
-    if (_isCaller && !_answerApplied && row['answer'] != null) {
-      final answer = row['answer'] as Map;
-      try {
-        await pc.setRemoteDescription(
-          RTCSessionDescription(answer['sdp'] as String, answer['type'] as String),
-        );
-        _answerApplied = true;
-        _remoteDescSet = true;
-        await _flushPendingIce();
-      } catch (e) {
-        debugPrint('setRemoteDescription(answer) failed: $e');
-      }
-    }
-
-    final remoteColumn = _isCaller ? 'receiver_ice' : 'caller_ice';
-    final remote = row[remoteColumn];
-    if (remote is List && remote.length > _remoteIceApplied) {
-      for (final raw in remote.sublist(_remoteIceApplied)) {
-        final ice = raw as Map;
-        final candidate = RTCIceCandidate(
-          ice['candidate'] as String?,
-          ice['sdpMid'] as String?,
-          ice['sdpMLineIndex'] as int?,
-        );
-        if (_remoteDescSet) {
-          try {
-            await pc.addCandidate(candidate);
-          } catch (e) {
-            debugPrint('addCandidate failed: $e');
-          }
-        } else {
-          _pendingRemoteIce.add(candidate);
-        }
-      }
-      _remoteIceApplied = remote.length;
-    }
-  }
-
-  static Future<void> _flushPendingIce() async {
-    final pc = _pc;
-    if (pc == null) return;
-    for (final c in List<RTCIceCandidate>.from(_pendingRemoteIce)) {
-      await pc.addCandidate(c);
-    }
-    _pendingRemoteIce.clear();
-  }
-
-  static Future<void> _fail() => endCall(reason: 'failed');
-
-  static String _friendly(Object e) {
-    final text = e.toString().replaceFirst(RegExp(r'^[A-Za-z]*(Error|Exception): '), '');
-    return text.length > 160 ? '${text.substring(0, 160)}…' : text;
-  }
-
-  /// Ends the call. The UI returns to idle at once; media and network cleanup follow.
-  static Future<void> endCall({String reason = 'ended', bool notifyRemote = true}) async {
-    final hasResources = _pc != null || _localStream != null || _callId != null;
-    if (phase.value == CallPhase.idle && !hasResources) return;
-    lastEndReason = reason;
-    _ringTimer?.cancel();
-    _ringTimer = null;
-    _callPoll?.cancel();
-    _callPoll = null;
-    _connectTimer?.cancel();
-    _connectTimer = null;
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
-    _incomingExpiryTimer?.cancel();
-    _incomingExpiryTimer = null;
-
-    final id = _callId;
-    final wasActive = phase.value != CallPhase.idle;
-    final pc = _pc;
-    final stream = _localStream;
-    final channel = _callChannel;
-
-    _pc = null;
-    _localStream = null;
-    _callChannel = null;
-    _callId = null;
-    _remoteDescSet = false;
-    _answerApplied = false;
-    _remoteIceApplied = 0;
-    _pendingRemoteIce.clear();
-    _iceWriteChain = Future.value();
-    connectedAtMs.value = null;
-
-    await _releaseMedia(pc, stream, channel);
-
-    phase.value = CallPhase.idle;
-
-    if (notifyRemote && id != null && wasActive) {
-      unawaited(_db
-          .from('calls')
-          .update({'status': 'ended'})
-          .eq('id', id)
-          .timeout(const Duration(seconds: 5))
-          .catchError((_) {}));
-    }
-  }
-
-  /// Closes the connection and stops the microphone (clears the green mic dot).
-  static Future<void> _releaseMedia(
-    RTCPeerConnection? pc,
-    MediaStream? stream,
-    RealtimeChannel? channel,
-  ) async {
-    for (final track in stream?.getAudioTracks() ?? const <MediaStreamTrack>[]) {
-      try {
-        await track.stop().timeout(const Duration(seconds: 2));
-      } catch (e) {
-        debugPrint('track.stop: $e');
-      }
-    }
-    try {
-      await stream?.dispose().timeout(const Duration(seconds: 2));
-    } catch (e) {
-      debugPrint('stream.dispose: $e');
-    }
-    try {
-      await pc?.close().timeout(const Duration(seconds: 3));
-    } catch (e) {
-      debugPrint('pc.close: $e');
-    }
-    try {
-      await channel?.unsubscribe().timeout(const Duration(seconds: 2));
-    } catch (e) {
-      debugPrint('unsubscribe: $e');
-    }
   }
 }
 
@@ -7140,6 +6117,8 @@ FILE: android/app/src/main/AndroidManifest.xml
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="33" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
     <application
