@@ -685,71 +685,114 @@ class _ChatScreenState extends State<ChatScreen> {
                                 final String caption = result['caption'];
                                 final albumId = 'album_${DateTime.now().millisecondsSinceEpoch}';
 
+                                if (selectedAssets.isEmpty) return;
+
+                                // 1. CACHE ALL FILES LOCALLY FIRST
+                                List<File> cachedFiles = [];
                                 for (var asset in selectedAssets) {
-                                  // 1. Instantly show the local image and "sending" animation
-                                  if (widget.isAi) {
-                                    final file = await asset.file;
-                                    if (file != null) {
-                                      final bytes = await file.readAsBytes();
-                                      final base64String = base64Encode(bytes);
+                                  final file = await asset.file;
+                                  if (file != null) cachedFiles.add(file);
+                                }
+
+                                if (cachedFiles.isEmpty) return;
+
+                                if (widget.isAi) {
+                                  // AI handling (unchanged)
+                                  for (var file in cachedFiles) {
+                                    final bytes = await file.readAsBytes();
+                                    final base64String = base64Encode(bytes);
+                                    setState(() {
+                                      _messages.add(Message(DateTime.now().toString(), file.path, true, isImage: true, caption: caption.isNotEmpty ? caption : null, albumId: albumId));
+                                    });
+                                    _scrollToBottom();
+                                    _triggerAiResponse(caption.isNotEmpty ? caption : "Examine this image.", imageBase64: base64String);
+                                  }
+                                } else if (_currentUserId != null) {
+                                  // 2. SHOW ALL LOCAL IMAGES AT ONCE WITH SENDING DOTS
+                                  List<Message> tempMessages = [];
+                                  int cppTime = 0;
+                                  try { cppTime = DinorCore.load().getFastTimestamp(); } catch (_) {}
+
+                                  for (int i = 0; i < cachedFiles.length; i++) {
+                                    final file = cachedFiles[i];
+                                    final tempId = 'temp_${cppTime}_$i';
+                                    tempMessages.add(Message(
+                                      tempId, 
+                                      file.path, 
+                                      true, 
+                                      isImage: true, 
+                                      caption: (i == 0 && caption.isNotEmpty) ? caption : null, 
+                                      status: MessageStatus.sending, 
+                                      albumId: albumId
+                                    ));
+                                  }
+
+                                  setState(() => _messages.addAll(tempMessages));
+                                  _scrollToBottom();
+
+                                  // 3. UPLOAD ALL FILES SIMULTANEOUSLY IN BACKGROUND
+                                  for (int i = 0; i < cachedFiles.length; i++) {
+                                    final file = cachedFiles[i];
+                                    final tempId = tempMessages[i].id;
+
+                                    try {
+                                      final fileName = '${DateTime.now().millisecondsSinceEpoch}_${i}_$_currentUserId.jpg';
+                                      await supabase.storage.from('chat_media').upload(fileName, file);
+                                      final publicUrl = supabase.storage.from('chat_media').getPublicUrl(fileName);
+
+                                      final response = await supabase.from('messages').insert({
+                                        'sender_id': _currentUserId,
+                                        'content': publicUrl,
+                                        'is_image': true,
+                                        'conversation_id': widget.conversationId,
+                                        'is_read': false,
+                                        'album_id': albumId,
+                                      }).select('id').single();
+
+                                      // Replace temp message with sent message
                                       setState(() {
-                                        _messages.add(Message(DateTime.now().toString(), file.path, true, isImage: true, caption: caption.isNotEmpty ? caption : null, albumId: albumId));
+                                        final index = _messages.indexWhere((m) => m.id == tempId);
+                                        if (index != -1) {
+                                          _messages[index] = Message(
+                                            response['id'].toString(), 
+                                            publicUrl, 
+                                            true, 
+                                            isImage: true, 
+                                            caption: tempMessages[i].caption, 
+                                            status: MessageStatus.sent, 
+                                            albumId: albumId
+                                          );
+                                        }
                                       });
-                                      _scrollToBottom();
-                                      _triggerAiResponse(caption.isNotEmpty ? caption : "Examine this image.", imageBase64: base64String);
-                                    }
-                                  } else if (_currentUserId != null) {
-                                    int cppTime = 0;
-                                    try { cppTime = DinorCore.load().getFastTimestamp(); } catch (_) {}
-                                    final tempId = 'temp_$cppTime';
-                                    
-                                    // Get file path for instant local display
-                                    final file = await asset.file;
-                                    if (file != null) {
-                                      // Show instantly on screen with SENDING dots
-                                      setState(() => _messages.add(Message(tempId, file.path, true, isImage: true, caption: caption.isNotEmpty ? caption : null, status: MessageStatus.sending, albumId: albumId)));
-                                      _scrollToBottom();
 
-                                      // Upload to Supabase in the background
-                                      try {
-                                        final fileName = '${DateTime.now().millisecondsSinceEpoch}_$_currentUserId.jpg';
-                                        await supabase.storage.from('chat_media').upload(fileName, file);
-                                        final publicUrl = supabase.storage.from('chat_media').getPublicUrl(fileName);
-
-                                        final response = await supabase.from('messages').insert({
-                                          'sender_id': _currentUserId,
-                                          'content': publicUrl,
-                                          'is_image': true,
-                                          'conversation_id': widget.conversationId,
-                                          'is_read': false,
-                                          'album_id': albumId,
-                                        }).select('id').single();
-
-                                        // Turn the "sending" dots into a "sent" checkmark
-                                        setState(() {
-                                          final index = _messages.indexWhere((m) => m.id == tempId);
-                                          if (index != -1) _messages[index] = Message(response['id'].toString(), publicUrl, true, isImage: true, caption: caption.isNotEmpty ? caption : null, status: MessageStatus.sent, albumId: albumId);
-                                        });
-
-                                        await supabase.from('conversations').update({
-                                          'last_message': '📷 Photo',
-                                          'last_message_time': DateTime.now().toUtc().toIso8601String(),
-                                        }).eq('id', widget.conversationId!);
-                                      } catch (e) {
-                                        // If upload fails, mark as failed
-                                        setState(() {
-                                          final index = _messages.indexWhere((m) => m.id == tempId);
-                                          if (index != -1) _messages[index] = Message(tempId, file.path, true, isImage: true, status: MessageStatus.failed, albumId: albumId);
-                                        });
-                                      }
+                                    } catch (e) {
+                                      // Mark as failed if upload fails
+                                      setState(() {
+                                        final index = _messages.indexWhere((m) => m.id == tempId);
+                                        if (index != -1) {
+                                          _messages[index] = Message(
+                                            tempId, 
+                                            file.path, 
+                                            true, 
+                                            isImage: true, 
+                                            status: MessageStatus.failed, 
+                                            albumId: albumId
+                                          );
+                                        }
+                                      });
                                     }
                                   }
+
+                                  // Update conversation last message
+                                  await supabase.from('conversations').update({
+                                    'last_message': '📷 ${cachedFiles.length} Photos',
+                                    'last_message_time': DateTime.now().toUtc().toIso8601String(),
+                                  }).eq('id', widget.conversationId!);
                                 }
                               }
                             },
                           ),
-                          
-                          Expanded(
+                                                    Expanded(
                             child: Padding(
                               padding: const EdgeInsets.symmetric(vertical: 10),
                               child: TextField(
