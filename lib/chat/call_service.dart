@@ -448,7 +448,7 @@ pc.onConnectionState = (state) {
         default:
           break;
       }
-    };;
+    };
   }
 
   /// Serializes ICE writes so concurrent candidates are never lost.
