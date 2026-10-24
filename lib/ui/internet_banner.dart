@@ -58,6 +58,3 @@ class _InternetBannerState extends State<InternetBanner> {
     );
   }
 }
-
-
-============================================================

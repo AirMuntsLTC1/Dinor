@@ -65,6 +65,3 @@ Deno.serve(async (req) => {
     return reply(500, { error: "Could not verify the code." });
   }
 });
-
-
-============================================================

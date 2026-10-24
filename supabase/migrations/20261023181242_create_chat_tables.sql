@@ -28,6 +28,3 @@ create policy "Users can insert their own messages." on public.messages for inse
 
 -- Enable Realtime for the messages table
 alter publication supabase_realtime add table public.messages;
-
-
-============================================================

@@ -307,6 +307,3 @@ class _CustomEmojiPickerState extends State<CustomEmojiPicker> {
     );
   }
 }
-
-
-============================================================

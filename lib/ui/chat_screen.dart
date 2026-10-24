@@ -1281,6 +1281,3 @@ class _AnimatedSendingDotsState extends State<_AnimatedSendingDots> with SingleT
     );
   }
 }
-
-
-============================================================

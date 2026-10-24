@@ -46,21 +46,21 @@ typedef _RetryD = int Function(int, int, int);
 class DinorCore {
   DinorCore._(DynamicLibrary? lib)
       : _lib = lib,
-        _version = lib == null ? null : _try(() => lib!.lookupFunction<_VersionC, _VersionD>('dinor_version')),
-        _utf8Len = lib == null ? null : _try(() => lib!.lookupFunction<_Utf8LenC, _Utf8LenD>('dinor_utf8_length')),
-        _encrypt = lib == null ? null : _try(() => lib!.lookupFunction<_TextFnC, _TextFnD>('dinor_encrypt')),
-        _format = lib == null ? null : _try(() => lib!.lookupFunction<_TextFnC, _TextFnD>('dinor_format_message')),
-        _sanitize = lib == null ? null : _try(() => lib!.lookupFunction<_TextFnC, _TextFnD>('dinor_sanitize_input')),
-        _batchSanitize = lib == null ? null : _try(() => lib!.lookupFunction<_TextFnC, _TextFnD>('dinor_batch_sanitize')),
-        _escapeLike = lib == null ? null : _try(() => lib!.lookupFunction<_TextFnC, _TextFnD>('dinor_escape_like')),
-        _search = lib == null ? null : _try(() => lib!.lookupFunction<_SearchC, _SearchD>('dinor_fast_search')),
-        _extract = lib == null ? null : _try(() => lib!.lookupFunction<_ExtractC, _ExtractD>('dinor_extract_web_answer')),
-        _hash = lib == null ? null : _try(() => lib!.lookupFunction<_HashC, _HashD>('dinor_calculate_hash')),
-        _animation = lib == null ? null : _try(() => lib!.lookupFunction<_AnimationC, _AnimationD>('dinor_animation_scale')),
-        _status = lib == null ? null : _try(() => lib!.lookupFunction<_StatusC, _StatusD>('dinor_get_status_icon')),
-        _timestamp = lib == null ? null : _try(() => lib!.lookupFunction<_TimestampC, _TimestampD>('dinor_fast_timestamp')),
-        _stale = lib == null ? null : _try(() => lib!.lookupFunction<_StaleC, _StaleD>('dinor_is_stale')),
-        _retry = lib == null ? null : _try(() => lib!.lookupFunction<_RetryC, _RetryD>('dinor_retry_delay_ms'));
+        _version = lib == null ? null : _try(() => lib.lookupFunction<_VersionC, _VersionD>('dinor_version')),
+        _utf8Len = lib == null ? null : _try(() => lib.lookupFunction<_Utf8LenC, _Utf8LenD>('dinor_utf8_length')),
+        _encrypt = lib == null ? null : _try(() => lib.lookupFunction<_TextFnC, _TextFnD>('dinor_encrypt')),
+        _format = lib == null ? null : _try(() => lib.lookupFunction<_TextFnC, _TextFnD>('dinor_format_message')),
+        _sanitize = lib == null ? null : _try(() => lib.lookupFunction<_TextFnC, _TextFnD>('dinor_sanitize_input')),
+        _batchSanitize = lib == null ? null : _try(() => lib.lookupFunction<_TextFnC, _TextFnD>('dinor_batch_sanitize')),
+        _escapeLike = lib == null ? null : _try(() => lib.lookupFunction<_TextFnC, _TextFnD>('dinor_escape_like')),
+        _search = lib == null ? null : _try(() => lib.lookupFunction<_SearchC, _SearchD>('dinor_fast_search')),
+        _extract = lib == null ? null : _try(() => lib.lookupFunction<_ExtractC, _ExtractD>('dinor_extract_web_answer')),
+        _hash = lib == null ? null : _try(() => lib.lookupFunction<_HashC, _HashD>('dinor_calculate_hash')),
+        _animation = lib == null ? null : _try(() => lib.lookupFunction<_AnimationC, _AnimationD>('dinor_animation_scale')),
+        _status = lib == null ? null : _try(() => lib.lookupFunction<_StatusC, _StatusD>('dinor_get_status_icon')),
+        _timestamp = lib == null ? null : _try(() => lib.lookupFunction<_TimestampC, _TimestampD>('dinor_fast_timestamp')),
+        _stale = lib == null ? null : _try(() => lib.lookupFunction<_StaleC, _StaleD>('dinor_is_stale')),
+        _retry = lib == null ? null : _try(() => lib.lookupFunction<_RetryC, _RetryD>('dinor_retry_delay_ms'));
 
   static DinorCore? _instance;
 
@@ -128,14 +128,14 @@ class DinorCore {
   // ---- identity ------------------------------------------------------------
   String version() {
     if (_version == null) return 'Dinor (Dart fallback)';
-    return _version!().toDartString();
+    return _version().toDartString();
   }
 
   int utf8Length(String text) {
     if (_utf8Len == null) return _bytes(text);
     final p = text.toNativeUtf8();
     try {
-      return _utf8Len!(p);
+      return _utf8Len(p);
     } finally {
       calloc.free(p);
     }
@@ -155,7 +155,7 @@ class DinorCore {
     final h = haystack.toNativeUtf8();
     final n = needle.toNativeUtf8();
     try {
-      return _search!(h, n) == 1;
+      return _search(h, n) == 1;
     } finally {
       calloc.free(h);
       calloc.free(n);
@@ -169,7 +169,7 @@ class DinorCore {
     const outSize = 512;
     final out = calloc<Uint8>(outSize).cast<Utf8>();
     try {
-      final n = _extract!(q, w, out, outSize);
+      final n = _extract(q, w, out, outSize);
       return n < 0 ? '' : out.toDartString();
     } finally {
       calloc.free(q);
@@ -212,7 +212,7 @@ class DinorCore {
     }
     final p = text.toNativeUtf8();
     try {
-      return _hash!(p);
+      return _hash(p);
     } finally {
       calloc.free(p);
     }
@@ -221,7 +221,7 @@ class DinorCore {
   // ---- timing / cache ------------------------------------------------------
   int getFastTimestamp() {
     if (_timestamp == null) return DateTime.now().millisecondsSinceEpoch;
-    return _timestamp!();
+    return _timestamp();
   }
 
   /// True when a cache entry saved at [savedAtMs] is older than [ttlMs].
@@ -231,7 +231,7 @@ class DinorCore {
       if (savedAtMs <= 0 || ttlMs <= 0 || now < savedAtMs) return true;
       return now - savedAtMs > ttlMs;
     }
-    return _stale!(savedAtMs, ttlMs, now) == 1;
+    return _stale(savedAtMs, ttlMs, now) == 1;
   }
 
   /// Exponential backoff delay in ms for retry [attempt] (0-based).
@@ -241,7 +241,7 @@ class DinorCore {
       final d = baseMs * (1 << shift);
       return d > capMs ? capMs : d;
     }
-    return _retry!(attempt, baseMs, capMs);
+    return _retry(attempt, baseMs, capMs);
   }
 
   // ---- animation / status --------------------------------------------------
@@ -252,7 +252,7 @@ class DinorCore {
       if (progress < 0) progress += 1.0;
       return 1.0 + (0.6 * (progress < 0.5 ? progress * 2 : (1 - progress) * 2));
     }
-    return _animation!(timeSeconds, dotIndex);
+    return _animation(timeSeconds, dotIndex);
   }
 
   String getStatusIcon(int statusCode) {
@@ -264,6 +264,6 @@ class DinorCore {
         default: return 'unknown';
       }
     }
-    return _status!(statusCode).toDartString();
+    return _status(statusCode).toDartString();
   }
 }

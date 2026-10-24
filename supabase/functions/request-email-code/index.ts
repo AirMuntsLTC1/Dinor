@@ -160,6 +160,3 @@ Deno.serve(async (req) => {
     return reply(500, { error: "Could not request a sign-in code." });
   }
 });
-
-
-============================================================

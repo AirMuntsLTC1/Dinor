@@ -30,6 +30,3 @@ using (auth.uid() = user1_id or auth.uid() = user2_id);
 
 -- 4. Enable Realtime for conversations
 alter publication supabase_realtime add table public.conversations;
-
-
-============================================================

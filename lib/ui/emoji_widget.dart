@@ -77,6 +77,3 @@ class _AnimatedEmojiState extends State<AnimatedEmoji> with SingleTickerProvider
     );
   }
 }
-
-
-============================================================

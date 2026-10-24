@@ -304,6 +304,3 @@ class _CustomMediaPickerState extends State<CustomMediaPicker> {
   }
 
 }
-
-
-============================================================
