@@ -578,6 +578,12 @@ pc.onConnectionState = (state) {
     _ringTimer = null;
     _callPoll?.cancel();
     _callPoll = null;
+    _connectTimer?.cancel();
+    _connectTimer = null;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _incomingExpiryTimer?.cancel();
+    _incomingExpiryTimer = null;
 
     final id = _callId;
     final wasActive = phase.value != CallPhase.idle;
